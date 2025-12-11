@@ -26,7 +26,7 @@ CREDENTIALS_FILE = "/home/vshah3/face_annotation_app/gen-lang-client-0135953393-
 
 # Data settings
 PAIRS_CSV = "pairs.csv"
-IMAGE_BASE_PATH = "/home/vshah3/celeba/verification_task/images/"
+IMAGE_BASE_PATH = "images/"
 
 # If using URLs for images (e.g., from a server), set this to True
 USE_IMAGE_URLS = False
