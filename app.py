@@ -141,7 +141,7 @@ def get_image_path(filename):
 # UI COMPONENTS
 # =============================================================================
 
-def show_instructions():
+def show_instructions(pairs_df, sheet):
     """Display the instructions page."""
     st.markdown("""
     # Face Identity Annotation Task
@@ -179,9 +179,19 @@ def show_instructions():
     
     st.divider()
     
-    # Check if user already has a stored ID
+    # Check if user already has a stored ID - show their progress
     if st.session_state.annotator_id:
+        # Get their progress
+        completed = get_completed_pairs(sheet, st.session_state.annotator_id)
+        total = len(pairs_df)
+        
         st.info(f"Welcome back, **{st.session_state.annotator_id}**!")
+        
+        # Show progress bar even on instructions page
+        progress = len(completed) / total if total > 0 else 0
+        st.progress(progress)
+        st.caption(f"Your progress: {len(completed)} / {total} pairs completed")
+        
         if st.button("Continue Annotating", type="primary"):
             st.session_state.show_instructions = False
             st.rerun()
@@ -200,12 +210,17 @@ def show_instructions():
     name_valid = len(annotator_id.strip()) >= MIN_NAME_LENGTH
     
     if annotator_id and not name_valid:
-        st.warning(f"Please enter at least {MIN_NAME_LENGTH} characters for your name or ID.")
+        st.warning(f"Please enter at least {MIN_NAME_LENGTH} characters ({len(annotator_id.strip())}/{MIN_NAME_LENGTH})")
+    elif annotator_id and name_valid:
+        st.success(f"Name valid ({len(annotator_id.strip())} characters)")
     
     # Button always visible, disabled if invalid
     if st.button("I understand, start annotating", type="primary", disabled=not name_valid):
         st.session_state.annotator_id = annotator_id.strip()
         st.session_state.show_instructions = False
+        # Reset current pair index so it recalculates from completed pairs
+        if 'current_pair_idx' in st.session_state:
+            del st.session_state.current_pair_idx
         st.rerun()
 
 
@@ -215,38 +230,39 @@ def show_annotation_interface(pairs_df, sheet):
     # Get current annotator
     annotator_id = st.session_state.annotator_id
     
-    # Get completed pairs for this annotator
+    # Get completed pairs for this annotator (fetch fresh each time)
     completed = get_completed_pairs(sheet, annotator_id)
     
     # Find next pair to annotate
-    remaining = [i for i in pairs_df['index'].tolist() if i not in completed]
+    all_pairs = pairs_df['index'].tolist()
+    remaining = [i for i in all_pairs if i not in completed]
+    
+    # Calculate progress
+    total = len(all_pairs)
+    num_completed = len(completed)
+    progress = num_completed / total if total > 0 else 0
+    
+    # Progress bar at top
+    st.progress(progress)
+    st.caption(f"Progress: {num_completed} / {total} pairs completed")
     
     if not remaining:
         st.success("You have completed all annotations! Thank you!")
-        st.info(f"Total annotations: {len(completed)}")
         
         if st.button("Start over (re-annotate all pairs)"):
             st.session_state.current_pair_idx = 0
             st.rerun()
         return
     
-    # Get current pair index
-    if 'current_pair_idx' not in st.session_state:
-        st.session_state.current_pair_idx = 0
-    
-    # Get the actual pair index from remaining list
-    current_pair = remaining[min(st.session_state.current_pair_idx, len(remaining) - 1)]
+    # Get current pair - always take the first remaining one
+    current_pair = remaining[0]
     pair_data = pairs_df[pairs_df['index'] == current_pair].iloc[0]
-    
-    # Progress bar
-    progress = len(completed) / len(pairs_df)
-    st.progress(progress)
-    st.caption(f"Progress: {len(completed)} / {len(pairs_df)} pairs completed")
     
     # Sidebar with annotator info
     with st.sidebar:
         st.markdown(f"**Annotator:** {annotator_id}")
-        st.markdown(f"**Pair:** {current_pair}")
+        st.markdown(f"**Current Pair:** {current_pair}")
+        st.markdown(f"**Completed:** {num_completed} / {total}")
         st.divider()
         if st.button("View Instructions"):
             st.session_state.show_instructions = True
@@ -322,7 +338,9 @@ def show_annotation_interface(pairs_df, sheet):
     explanation_valid = len(initial_explanation.strip()) >= MIN_EXPLANATION_LENGTH
     
     if initial_explanation and not explanation_valid:
-        st.warning(f"Please provide a more detailed explanation (at least {MIN_EXPLANATION_LENGTH} characters)")
+        st.warning(f"Please provide a more detailed explanation ({len(initial_explanation.strip())}/{MIN_EXPLANATION_LENGTH} characters)")
+    elif initial_explanation and explanation_valid:
+        st.success(f"Explanation valid ({len(initial_explanation.strip())} characters)")
     
     # ===================
     # STEP 4: Submit and compare
@@ -381,7 +399,6 @@ def show_annotation_interface(pairs_df, sheet):
                 
                 if save_annotation(sheet, annotation):
                     st.session_state.submitted = False
-                    st.session_state.current_pair_idx += 1
                     st.rerun()
         
         else:
@@ -408,7 +425,9 @@ def show_annotation_interface(pairs_df, sheet):
             followup_valid = len(followup_explanation.strip()) >= MIN_EXPLANATION_LENGTH
             
             if followup_explanation and not followup_valid:
-                st.warning(f"Please provide a more detailed reflection (at least {MIN_EXPLANATION_LENGTH} characters)")
+                st.warning(f"Please provide a more detailed reflection ({len(followup_explanation.strip())}/{MIN_EXPLANATION_LENGTH} characters)")
+            elif followup_explanation and followup_valid:
+                st.success(f"Reflection valid ({len(followup_explanation.strip())} characters)")
             
             if st.button("Next Pair", type="primary", key="next_incorrect", disabled=not followup_valid):
                 # Save annotation
@@ -428,7 +447,6 @@ def show_annotation_interface(pairs_df, sheet):
                 
                 if save_annotation(sheet, annotation):
                     st.session_state.submitted = False
-                    st.session_state.current_pair_idx += 1
                     st.rerun()
 
 
@@ -464,7 +482,7 @@ def main():
     
     # Show appropriate page
     if st.session_state.show_instructions:
-        show_instructions()
+        show_instructions(pairs_df, sheet)
     elif st.session_state.annotator_id is None:
         st.session_state.show_instructions = True
         st.rerun()
