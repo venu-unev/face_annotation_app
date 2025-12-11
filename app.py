@@ -304,9 +304,12 @@ def show_annotation_interface(pairs_df, sheet):
             st.rerun()
         return
     
-    # Get current pair - always take the first remaining one
+    # Current pair (always first remaining)
     current_pair = remaining[0]
     pair_data = pairs_df[pairs_df['index'] == current_pair].iloc[0]
+    
+    # Are we in "review incorrect" mode for this pair?
+    review_mode = st.session_state.get("submitted", False)
     
     # Sidebar (minimal)
     with st.sidebar:
@@ -327,32 +330,35 @@ def show_annotation_interface(pairs_df, sheet):
             st.rerun()
     
     # ------------------------------------------------------------
-    # 1. Images (slightly smaller for compact layout)
+    # 1. Images (centered and a bit closer)
     # ------------------------------------------------------------
     st.markdown("#### 1. Compare these faces")
     
-    img_col1, img_col2 = st.columns(2)
-    with img_col1:
-        st.markdown("**Face A**")
-        image_a_path = get_image_path(pair_data['A'])
-        try:
-            st.image(image_a_path, width=320)
-        except Exception:
-            st.error(f"Could not load image: {image_a_path}")
-        st.caption(f"`{pair_data['A']}`")
-    with img_col2:
-        st.markdown("**Face B**")
-        image_b_path = get_image_path(pair_data['B'])
-        try:
-            st.image(image_b_path, width=320)
-        except Exception:
-            st.error(f"Could not load image: {image_b_path}")
-        st.caption(f"`{pair_data['B']}`")
+    # Center the two images inside a slightly narrower row
+    outer_left, outer_center, outer_right = st.columns([0.1, 0.8, 0.1])
+    with outer_center:
+        img_col1, img_col2 = st.columns(2)
+        with img_col1:
+            st.markdown("**Face A**")
+            image_a_path = get_image_path(pair_data['A'])
+            try:
+                st.image(image_a_path, width=320)
+            except Exception:
+                st.error(f"Could not load image: {image_a_path}")
+            st.caption(f"`{pair_data['A']}`")
+        with img_col2:
+            st.markdown("**Face B**")
+            image_b_path = get_image_path(pair_data['B'])
+            try:
+                st.image(image_b_path, width=320)
+            except Exception:
+                st.error(f"Could not load image: {image_b_path}")
+            st.caption(f"`{pair_data['B']}`")
     
     st.markdown("---")
     
     # ------------------------------------------------------------
-    # 2. Decision + explanation side by side
+    # 2. Decision + explanation (always shown, even in review mode)
     # ------------------------------------------------------------
     st.markdown("#### 2. Your decision and explanation")
     decision_col, expl_col = st.columns([1, 2])
@@ -390,7 +396,6 @@ def show_annotation_interface(pairs_df, sheet):
     
     explanation_valid = len(initial_explanation.strip()) >= MIN_EXPLANATION_LENGTH
     
-    # Inline feedback (compact)
     feedback_col, _ = st.columns([2, 1])
     with feedback_col:
         if initial_explanation:
@@ -410,68 +415,69 @@ def show_annotation_interface(pairs_df, sheet):
     st.markdown("---")
     
     # ------------------------------------------------------------
-    # 3. Submit (auto-next on correct)
+    # 3. Submit (only shown when NOT in review mode)
     # ------------------------------------------------------------
-    st.markdown("#### 3. Submit")
-    if st.button("Submit Answer", type="primary", key=f"submit_{current_pair}"):
-        if decision is None:
-            st.error("Please select whether these are the same person or different people before submitting.")
-        elif not explanation_valid:
-            st.error(
-                f"Your explanation must be at least {MIN_EXPLANATION_LENGTH} characters "
-                f"({len(initial_explanation.strip())}/{MIN_EXPLANATION_LENGTH})."
-            )
-        else:
-            ground_truth = str(pair_data['ground_truth']).lower()
-            is_correct = (decision == ground_truth)
-            
-            if is_correct:
-                # CORRECT: save immediately and advance
-                annotation = {
-                    "timestamp": datetime.now().isoformat(),
-                    "annotator_id": annotator_id,
-                    "pair_index": int(pair_data['index']),
-                    "image_a": pair_data['A'],
-                    "image_b": pair_data['B'],
-                    "ground_truth": ground_truth,
-                    "celeb_id": str(pair_data['celeb_id']),
-                    "human_decision": decision,
-                    "initial_explanation": initial_explanation,
-                    "is_correct": True,
-                    "followup_explanation": "",
-                }
-                if save_annotation(sheet, annotation):
-                    st.session_state.completed_local.add(int(pair_data['index']))
-                    st.session_state.submitted = False
-                    st.rerun()
+    if not review_mode:
+        st.markdown("#### 3. Submit")
+        if st.button("Submit Answer", type="primary", key=f"submit_{current_pair}"):
+            if decision is None:
+                st.error("Please select whether these are the same person or different people before submitting.")
+            elif not explanation_valid:
+                st.error(
+                    f"Your explanation must be at least {MIN_EXPLANATION_LENGTH} characters "
+                    f"({len(initial_explanation.strip())}/{MIN_EXPLANATION_LENGTH})."
+                )
             else:
-                # INCORRECT: store state and show reflect UI
-                st.session_state.submitted = True
-                st.session_state.is_correct = False
-                st.session_state.ground_truth = ground_truth
-                st.session_state.decision = decision
-                st.session_state.initial_explanation = initial_explanation
-                st.session_state.pair_data = pair_data
-                st.rerun()
+                ground_truth = str(pair_data['ground_truth']).lower()
+                is_correct = (decision == ground_truth)
+                
+                if is_correct:
+                    # CORRECT: save immediately and advance
+                    annotation = {
+                        "timestamp": datetime.now().isoformat(),
+                        "annotator_id": annotator_id,
+                        "pair_index": int(pair_data['index']),
+                        "image_a": pair_data['A'],
+                        "image_b": pair_data['B'],
+                        "ground_truth": ground_truth,
+                        "celeb_id": str(pair_data['celeb_id']),
+                        "human_decision": decision,
+                        "initial_explanation": initial_explanation,
+                        "is_correct": True,
+                        "followup_explanation": "",
+                    }
+                    if save_annotation(sheet, annotation):
+                        st.session_state.completed_local.add(int(pair_data['index']))
+                        st.session_state.submitted = False
+                        st.rerun()
+                else:
+                    # INCORRECT: store state and go into review mode
+                    st.session_state.submitted = True
+                    st.session_state.is_correct = False
+                    st.session_state.ground_truth = ground_truth
+                    st.session_state.decision = decision
+                    st.session_state.initial_explanation = initial_explanation
+                    st.session_state.pair_data = pair_data
+                    st.rerun()
     
     # ------------------------------------------------------------
-    # 4. Reveal + reflect (only when incorrect)
+    # 4. Reveal + reflect (only when incorrect / review_mode)
     # ------------------------------------------------------------
     if st.session_state.get("submitted", False):
+        # We are in incorrect-review mode
         is_correct = st.session_state.is_correct
         ground_truth = st.session_state.ground_truth
         decision = st.session_state.decision
         initial_explanation = st.session_state.initial_explanation
         pair_state = st.session_state.pair_data
 
-        # Safety: should never be true now, but guard anyway
+        # Safety: should not happen, but if correct just reset
         if is_correct:
             st.session_state.submitted = False
             st.rerun()
         
-        st.markdown("---")
-        st.error("#### Incorrect")
-        
+        # No big red block, just a simple header + text
+        st.markdown("#### 3. Review (your answer was incorrect)")
         st.markdown(
             f"**Ground truth:** {ground_truth.upper()} &nbsp;&nbsp; "
             f"**Your answer:** {decision}"
@@ -533,6 +539,7 @@ def show_annotation_interface(pairs_df, sheet):
                     st.rerun()
 
 
+
 # =============================================================================
 # MAIN APP
 # =============================================================================
@@ -544,15 +551,18 @@ def main():
         layout="wide"
     )
     
-    # --- Compact layout CSS ---
+    # --- Compact layout CSS (with a bit more top padding so headings aren't cropped) ---
     st.markdown(
         """
         <style>
         .block-container {
-            padding-top: 1.2rem;
-            padding-bottom: 1.2rem;
+            max-width: 1000px;
+            padding-top: 2.6rem;
+            padding-bottom: 1.6rem;
             padding-left: 2rem;
             padding-right: 2rem;
+            margin-left: auto;
+            margin-right: auto;
         }
         h1, h2, h3, h4 {
             margin-top: 0.6rem;
@@ -566,6 +576,8 @@ def main():
         """,
         unsafe_allow_html=True,
     )
+    ...
+
 
     # Initialize session state
     if 'show_instructions' not in st.session_state:
