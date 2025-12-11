@@ -270,7 +270,7 @@ def show_instructions(pairs_df, sheet):
 
 
 def show_annotation_interface(pairs_df, sheet):
-    """Display the main annotation interface."""
+    """Display the main annotation interface (compact layout)."""
     
     annotator_id = st.session_state.annotator_id
     ensure_local_progress_initialized(sheet, pairs_df)
@@ -283,9 +283,17 @@ def show_annotation_interface(pairs_df, sheet):
     num_completed = len(completed)
     progress = num_completed / total if total > 0 else 0
     
-    # Progress bar at top
-    st.progress(progress)
-    st.caption(f"Progress: {num_completed} / {total} pairs completed")
+    # Top row: title + progress bar
+    header_col, progress_col = st.columns([1.2, 2])
+    with header_col:
+        st.markdown("### Face Identity Annotation")
+        st.markdown(
+            f"<span class='small-caption'>Annotator: <b>{annotator_id}</b> &nbsp;|&nbsp; "
+            f"Completed: {num_completed} / {total}</span>",
+            unsafe_allow_html=True,
+        )
+    with progress_col:
+        st.progress(progress)
     
     if not remaining:
         st.success("You have completed all annotations! Thank you!")
@@ -300,10 +308,11 @@ def show_annotation_interface(pairs_df, sheet):
     current_pair = remaining[0]
     pair_data = pairs_df[pairs_df['index'] == current_pair].iloc[0]
     
-    # Sidebar with annotator info
+    # Sidebar (kept minimal)
     with st.sidebar:
+        st.markdown("#### Session")
         st.markdown(f"**Annotator:** {annotator_id}")
-        st.markdown(f"**Current Pair:** {current_pair}")
+        st.markdown(f"**Current Pair:** `{current_pair}`")
         st.markdown(f"**Completed:** {num_completed} / {total}")
         st.divider()
         if st.button("View Instructions"):
@@ -317,6 +326,213 @@ def show_annotation_interface(pairs_df, sheet):
                 del st.session_state.completed_local
             st.session_state.submitted = False
             st.rerun()
+    
+    st.markdown("#### 1. Compare these faces")
+    
+    # Images side-by-side, slightly smaller
+    img_col1, img_col2 = st.columns(2)
+    with img_col1:
+        st.markdown("**Face A**")
+        image_a_path = get_image_path(pair_data['A'])
+        try:
+            st.image(image_a_path, width=320)
+        except Exception:
+            st.error(f"Could not load image: {image_a_path}")
+        st.caption(f"`{pair_data['A']}`")
+    with img_col2:
+        st.markdown("**Face B**")
+        image_b_path = get_image_path(pair_data['B'])
+        try:
+            st.image(image_b_path, width=320)
+        except Exception:
+            st.error(f"Could not load image: {image_b_path}")
+        st.caption(f"`{pair_data['B']}`")
+    
+    st.markdown("---")
+    
+    # Decision + explanation in a single row to reduce scroll
+    st.markdown("#### 2. Your decision and explanation")
+    decision_col, expl_col = st.columns([1, 2])
+    
+    with decision_col:
+        decision = st.radio(
+            "Are these the same person?",
+            options=["same", "different"],
+            index=None,
+            horizontal=False,
+            key=f"decision_{current_pair}"
+        )
+    
+    if decision == "same":
+        expl_placeholder = (
+            "Describe the facial features that indicate these are the same person "
+            "(e.g., nose shape, eye spacing, jawline, distinctive marks)..."
+        )
+        expl_label = f"Explanation (min {MIN_EXPLANATION_LENGTH} characters):"
+    elif decision == "different":
+        expl_placeholder = (
+            "Describe the facial features that indicate these are different people "
+            "(e.g., different nose shape, face structure, distinguishing features)..."
+        )
+        expl_label = f"Explanation (min {MIN_EXPLANATION_LENGTH} characters):"
+    else:
+        expl_placeholder = "First choose whether they are the same or different person on the left."
+        expl_label = f"Explanation (min {MIN_EXPLANATION_LENGTH} characters):"
+    
+    with expl_col:
+        initial_explanation = st.text_area(
+            expl_label,
+            placeholder=expl_placeholder,
+            key=f"explanation_{current_pair}",
+            disabled=(decision is None),
+            height=110,
+        )
+    
+    explanation_valid = len(initial_explanation.strip()) >= MIN_EXPLANATION_LENGTH
+    
+    # Inline feedback row (small, compact)
+    feedback_col, _ = st.columns([2, 1])
+    with feedback_col:
+        if initial_explanation:
+            if not explanation_valid:
+                st.markdown(
+                    f"<span class='small-caption' style='color:#cc6600;'>"
+                    f"Explanation length: {len(initial_explanation.strip())} / {MIN_EXPLANATION_LENGTH}</span>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    f"<span class='small-caption' style='color:#228B22;'>"
+                    f"Explanation length OK: {len(initial_explanation.strip())} characters</span>",
+                    unsafe_allow_html=True,
+                )
+    
+    st.markdown("---")
+    
+    # 3. Submit & branching logic (auto-next on correct)
+    st.markdown("#### 3. Submit")
+    if st.button("Submit Answer", type="primary", key=f"submit_{current_pair}"):
+        if decision is None:
+            st.error("Please select whether these are the same person or different people before submitting.")
+        elif not explanation_valid:
+            st.error(
+                f"Your explanation must be at least {MIN_EXPLANATION_LENGTH} characters "
+                f"({len(initial_explanation.strip())}/{MIN_EXPLANATION_LENGTH})."
+            )
+        else:
+            ground_truth = str(pair_data['ground_truth']).lower()
+            is_correct = (decision == ground_truth)
+
+            if is_correct:
+                # CORRECT CASE: save immediately and go to next pair
+                annotation = {
+                    "timestamp": datetime.now().isoformat(),
+                    "annotator_id": annotator_id,
+                    "pair_index": int(pair_data['index']),
+                    "image_a": pair_data['A'],
+                    "image_b": pair_data['B'],
+                    "ground_truth": ground_truth,
+                    "celeb_id": str(pair_data['celeb_id']),
+                    "human_decision": decision,
+                    "initial_explanation": initial_explanation,
+                    "is_correct": True,
+                    "followup_explanation": ""
+                }
+
+                if save_annotation(sheet, annotation):
+                    st.session_state.completed_local.add(int(pair_data['index']))
+                    st.session_state.submitted = False
+                    st.rerun()
+            else:
+                # INCORRECT CASE: trigger reveal/reflect flow
+                st.session_state.submitted = True
+                st.session_state.is_correct = False
+                st.session_state.ground_truth = ground_truth
+                st.session_state.decision = decision
+                st.session_state.initial_explanation = initial_explanation
+                st.session_state.pair_data = pair_data
+                st.rerun()
+    
+    # ===================
+    # Reveal and reflect (only when incorrect)
+    # ===================
+    if st.session_state.get('submitted', False):
+        # submitted=True corresponds to incorrect answer
+        is_correct = st.session_state.is_correct
+        ground_truth = st.session_state.ground_truth
+        decision = st.session_state.decision
+        initial_explanation = st.session_state.initial_explanation
+        pair_state = st.session_state.pair_data
+
+        if is_correct:
+            # Safety fallback (should not happen now)
+            st.session_state.submitted = False
+            st.rerun()
+
+        st.markdown("---")
+        st.error("#### Incorrect")
+
+        st.markdown(
+            f"**Ground truth:** {ground_truth.upper()} &nbsp;&nbsp; "
+            f"**Your answer:** {decision}"
+        )
+        st.markdown(
+            "Now that you know the correct answer, what features might you have "
+            "overlooked or misinterpreted?"
+        )
+
+        followup_explanation = st.text_area(
+            f"Reflection (min {MIN_EXPLANATION_LENGTH} characters):",
+            placeholder=(
+                "Describe what features you might have missed or misinterpreted. "
+                "What would you look for differently next time?"
+            ),
+            key=f"followup_{current_pair}",
+            height=110,
+        )
+
+        followup_valid = len(followup_explanation.strip()) >= MIN_EXPLANATION_LENGTH
+
+        if followup_explanation:
+            if not followup_valid:
+                st.markdown(
+                    f"<span class='small-caption' style='color:#cc6600;'>"
+                    f"Reflection length: {len(followup_explanation.strip())} / {MIN_EXPLANATION_LENGTH}</span>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    f"<span class='small-caption' style='color:#228B22;'>"
+                    f"Reflection length OK: {len(followup_explanation.strip())} characters</span>",
+                    unsafe_allow_html=True,
+                )
+
+        if st.button("Next Pair", type="primary", key="next_incorrect"):
+            if not followup_valid:
+                st.error(
+                    f"Your reflection must be at least {MIN_EXPLANATION_LENGTH} characters "
+                    f"({len(followup_explanation.strip())}/{MIN_EXPLANATION_LENGTH})."
+                )
+            else:
+                annotation = {
+                    "timestamp": datetime.now().isoformat(),
+                    "annotator_id": annotator_id,
+                    "pair_index": int(pair_state['index']),
+                    "image_a": pair_state['A'],
+                    "image_b": pair_state['B'],
+                    "ground_truth": ground_truth,
+                    "celeb_id": str(pair_state['celeb_id']),
+                    "human_decision": decision,
+                    "initial_explanation": initial_explanation,
+                    "is_correct": False,
+                    "followup_explanation": followup_explanation
+                }
+
+                if save_annotation(sheet, annotation):
+                    st.session_state.completed_local.add(int(pair_state['index']))
+                    st.session_state.submitted = False
+                    st.rerun()
+
     
     # ===================
     # STEP 1: Show images
@@ -542,6 +758,29 @@ def main():
         layout="wide"
     )
     
+    # --- Compact layout CSS ---
+    st.markdown(
+        """
+        <style>
+        .block-container {
+            padding-top: 1.2rem;
+            padding-bottom: 1.2rem;
+            padding-left: 2rem;
+            padding-right: 2rem;
+        }
+        h1, h2, h3, h4 {
+            margin-top: 0.6rem;
+            margin-bottom: 0.4rem;
+        }
+        .small-caption {
+            font-size: 0.85rem;
+            color: #666666;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     # Initialize session state
     if 'show_instructions' not in st.session_state:
         st.session_state.show_instructions = True
