@@ -32,6 +32,10 @@ IMAGE_BASE_PATH = "images/"
 USE_IMAGE_URLS = False
 IMAGE_URL_BASE = "https://yourserver.com/images/"  # Base URL if using URLs
 
+# Validation settings
+MIN_NAME_LENGTH = 5
+MIN_EXPLANATION_LENGTH = 20
+
 # =============================================================================
 # GOOGLE SHEETS FUNCTIONS
 # =============================================================================
@@ -175,21 +179,34 @@ def show_instructions():
     
     st.divider()
     
+    # Check if user already has a stored ID
+    if st.session_state.annotator_id:
+        st.info(f"Welcome back, **{st.session_state.annotator_id}**!")
+        if st.button("Continue Annotating", type="primary"):
+            st.session_state.show_instructions = False
+            st.rerun()
+        
+        st.divider()
+        st.markdown("##### Switch to a different user:")
+    
     # Annotator ID input
     annotator_id = st.text_input(
-        "Enter your name or ID to begin (minimum 5 characters):",
-        placeholder="e.g., john_doe or student_01"
+        f"Enter your name or ID (minimum {MIN_NAME_LENGTH} characters):",
+        placeholder="e.g., john_doe or student_01",
+        key="annotator_input"
     )
     
     # Validate length
-    if annotator_id:
-        if len(annotator_id.strip()) < 5:
-            st.warning("Please enter at least 5 characters for your name or ID.")
-        else:
-            if st.button("I understand, start annotating", type="primary"):
-                st.session_state.annotator_id = annotator_id.strip()
-                st.session_state.show_instructions = False
-                st.rerun()
+    name_valid = len(annotator_id.strip()) >= MIN_NAME_LENGTH
+    
+    if annotator_id and not name_valid:
+        st.warning(f"Please enter at least {MIN_NAME_LENGTH} characters for your name or ID.")
+    
+    # Button always visible, disabled if invalid
+    if st.button("I understand, start annotating", type="primary", disabled=not name_valid):
+        st.session_state.annotator_id = annotator_id.strip()
+        st.session_state.show_instructions = False
+        st.rerun()
 
 
 def show_annotation_interface(pairs_df, sheet):
@@ -205,7 +222,6 @@ def show_annotation_interface(pairs_df, sheet):
     remaining = [i for i in pairs_df['index'].tolist() if i not in completed]
     
     if not remaining:
-        st.balloons()
         st.success("You have completed all annotations! Thank you!")
         st.info(f"Total annotations: {len(completed)}")
         
@@ -283,48 +299,52 @@ def show_annotation_interface(pairs_df, sheet):
     # ===================
     # STEP 3: Initial explanation
     # ===================
-    if decision:
-        st.divider()
+    st.divider()
+    
+    if decision == "same":
+        st.markdown("## Why do you think they are the **same person**?")
+        placeholder = "Describe the facial features that indicate these are the same person (e.g., nose shape, eye spacing, jawline, distinctive marks)..."
+    elif decision == "different":
+        st.markdown("## Why do you think they are **different people**?")
+        placeholder = "Describe the facial features that indicate these are different people (e.g., different nose shape, face structure, distinguishing features)..."
+    else:
+        st.markdown("## Explain your reasoning")
+        placeholder = "First select whether they are the same or different person above..."
+    
+    initial_explanation = st.text_input(
+        f"Your explanation (minimum {MIN_EXPLANATION_LENGTH} characters):",
+        placeholder=placeholder,
+        key=f"explanation_{current_pair}",
+        disabled=(decision is None)
+    )
+    
+    # Check if explanation is sufficient
+    explanation_valid = len(initial_explanation.strip()) >= MIN_EXPLANATION_LENGTH
+    
+    if initial_explanation and not explanation_valid:
+        st.warning(f"Please provide a more detailed explanation (at least {MIN_EXPLANATION_LENGTH} characters)")
+    
+    # ===================
+    # STEP 4: Submit and compare
+    # ===================
+    st.divider()
+    
+    # Determine if form is complete
+    form_valid = decision is not None and explanation_valid
+    
+    if st.button("Submit Answer", type="primary", key=f"submit_{current_pair}", disabled=not form_valid):
+        # Compare with ground truth
+        ground_truth = pair_data['ground_truth'].lower()
+        is_correct = (decision == ground_truth)
         
-        if decision == "same":
-            st.markdown("## Why do you think they are the **same person**?")
-            placeholder = "Describe the facial features that indicate these are the same person (e.g., nose shape, eye spacing, jawline, distinctive marks)..."
-        else:
-            st.markdown("## Why do you think they are **different people**?")
-            placeholder = "Describe the facial features that indicate these are different people (e.g., different nose shape, face structure, distinguishing features)..."
-        
-        initial_explanation = st.text_input(
-            "Your explanation:",
-            placeholder=placeholder,
-            key=f"explanation_{current_pair}"
-        )
-        
-        # Check if explanation is sufficient
-        min_chars = 20
-        explanation_valid = len(initial_explanation.strip()) >= min_chars
-        
-        if initial_explanation and not explanation_valid:
-            st.warning(f"Please provide a more detailed explanation (at least {min_chars} characters)")
-        
-        # ===================
-        # STEP 4: Submit and compare
-        # ===================
-        if explanation_valid:
-            st.divider()
-            
-            if st.button("Submit Answer", type="primary", key=f"submit_{current_pair}"):
-                # Compare with ground truth
-                ground_truth = pair_data['ground_truth'].lower()
-                is_correct = (decision == ground_truth)
-                
-                # Store in session state for reveal
-                st.session_state.submitted = True
-                st.session_state.is_correct = is_correct
-                st.session_state.ground_truth = ground_truth
-                st.session_state.decision = decision
-                st.session_state.initial_explanation = initial_explanation
-                st.session_state.pair_data = pair_data
-                st.rerun()
+        # Store in session state for reveal
+        st.session_state.submitted = True
+        st.session_state.is_correct = is_correct
+        st.session_state.ground_truth = ground_truth
+        st.session_state.decision = decision
+        st.session_state.initial_explanation = initial_explanation
+        st.session_state.pair_data = pair_data
+        st.rerun()
     
     # ===================
     # STEP 5: Reveal and reflect (if submitted)
@@ -342,8 +362,6 @@ def show_annotation_interface(pairs_df, sheet):
             # CORRECT - Simple confirmation and move on
             st.success("## Correct!")
             st.markdown("Your assessment matches the ground truth. Great job!")
-            
-            followup_explanation = ""  # No followup needed
             
             if st.button("Next Pair", type="primary", key="next_correct"):
                 # Save annotation
@@ -382,37 +400,36 @@ def show_annotation_interface(pairs_df, sheet):
             st.markdown("Now that you know the correct answer, what features might you have overlooked or misinterpreted?")
             
             followup_explanation = st.text_input(
-                "Your reflection:",
+                f"Your reflection (minimum {MIN_EXPLANATION_LENGTH} characters):",
                 placeholder="Describe what features you might have missed or misinterpreted. What would you look for differently next time?",
                 key=f"followup_{current_pair}"
             )
             
-            followup_valid = len(followup_explanation.strip()) >= min_chars
+            followup_valid = len(followup_explanation.strip()) >= MIN_EXPLANATION_LENGTH
             
             if followup_explanation and not followup_valid:
-                st.warning(f"Please provide a more detailed reflection (at least {min_chars} characters)")
+                st.warning(f"Please provide a more detailed reflection (at least {MIN_EXPLANATION_LENGTH} characters)")
             
-            if followup_valid:
-                if st.button("Next Pair", type="primary", key="next_incorrect"):
-                    # Save annotation
-                    annotation = {
-                        "timestamp": datetime.now().isoformat(),
-                        "annotator_id": annotator_id,
-                        "pair_index": int(pair_data['index']),
-                        "image_a": pair_data['A'],
-                        "image_b": pair_data['B'],
-                        "ground_truth": ground_truth,
-                        "celeb_id": str(pair_data['celeb_id']),
-                        "human_decision": decision,
-                        "initial_explanation": initial_explanation,
-                        "is_correct": False,
-                        "followup_explanation": followup_explanation
-                    }
-                    
-                    if save_annotation(sheet, annotation):
-                        st.session_state.submitted = False
-                        st.session_state.current_pair_idx += 1
-                        st.rerun()
+            if st.button("Next Pair", type="primary", key="next_incorrect", disabled=not followup_valid):
+                # Save annotation
+                annotation = {
+                    "timestamp": datetime.now().isoformat(),
+                    "annotator_id": annotator_id,
+                    "pair_index": int(pair_data['index']),
+                    "image_a": pair_data['A'],
+                    "image_b": pair_data['B'],
+                    "ground_truth": ground_truth,
+                    "celeb_id": str(pair_data['celeb_id']),
+                    "human_decision": decision,
+                    "initial_explanation": initial_explanation,
+                    "is_correct": False,
+                    "followup_explanation": followup_explanation
+                }
+                
+                if save_annotation(sheet, annotation):
+                    st.session_state.submitted = False
+                    st.session_state.current_pair_idx += 1
+                    st.rerun()
 
 
 # =============================================================================
@@ -446,8 +463,11 @@ def main():
         st.warning("Running without Google Sheets. Annotations will not be saved.")
     
     # Show appropriate page
-    if st.session_state.show_instructions or st.session_state.annotator_id is None:
+    if st.session_state.show_instructions:
         show_instructions()
+    elif st.session_state.annotator_id is None:
+        st.session_state.show_instructions = True
+        st.rerun()
     else:
         show_annotation_interface(pairs_df, sheet)
 
