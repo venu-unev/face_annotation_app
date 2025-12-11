@@ -415,33 +415,9 @@ def show_annotation_interface(pairs_df, sheet):
         else:
             ground_truth = str(pair_data['ground_truth']).lower()
             is_correct = (decision == ground_truth)
-            
-            st.session_state.submitted = True
-            st.session_state.is_correct = is_correct
-            st.session_state.ground_truth = ground_truth
-            st.session_state.decision = decision
-            st.session_state.initial_explanation = initial_explanation
-            st.session_state.pair_data = pair_data
-            st.rerun()
-    
-    # ===================
-    # STEP 5: Reveal and reflect (if submitted)
-    # ===================
-    if st.session_state.get('submitted', False):
-        is_correct = st.session_state.is_correct
-        ground_truth = st.session_state.ground_truth
-        decision = st.session_state.decision
-        initial_explanation = st.session_state.initial_explanation
-        pair_data = st.session_state.pair_data
-        
-        st.divider()
-        
-        if is_correct:
-            # CORRECT - Simple confirmation and move on
-            st.success("## Correct!")
-            st.markdown("Your assessment matches the ground truth. Great job!")
-            
-            if st.button("Next Pair", type="primary", key="next_correct"):
+
+            if is_correct:
+                # CORRECT CASE: save immediately and go to next pair
                 annotation = {
                     "timestamp": datetime.now().isoformat(),
                     "annotator_id": annotator_id,
@@ -455,78 +431,104 @@ def show_annotation_interface(pairs_df, sheet):
                     "is_correct": True,
                     "followup_explanation": ""
                 }
+
+                if save_annotation(sheet, annotation):
+                    st.session_state.completed_local.add(int(pair_data['index']))
+                    st.session_state.submitted = False
+                    # Directly move to the next remaining pair
+                    st.rerun()
+
+            else:
+                # INCORRECT CASE: store state and show reveal/reflect UI
+                st.session_state.submitted = True
+                st.session_state.is_correct = False
+                st.session_state.ground_truth = ground_truth
+                st.session_state.decision = decision
+                st.session_state.initial_explanation = initial_explanation
+                st.session_state.pair_data = pair_data
+                st.rerun()
+
+    
+    # ===================
+    # STEP 5: Reveal and reflect (only for incorrect submissions)
+    # ===================
+    if st.session_state.get('submitted', False):
+        # In this flow, submitted=True always corresponds to an incorrect answer
+        is_correct = st.session_state.is_correct
+        ground_truth = st.session_state.ground_truth
+        decision = st.session_state.decision
+        initial_explanation = st.session_state.initial_explanation
+        pair_data = st.session_state.pair_data
+
+        # Safety: if somehow marked correct, just reset and move on
+        if is_correct:
+            st.session_state.submitted = False
+            st.rerun()
+
+        st.divider()
+        st.error("## Incorrect")
+        
+        st.markdown(f"""
+        ### The ground truth says: **{ground_truth.upper()}**
+        
+        You said **{decision}**, but these faces are actually **{ground_truth}**.
+        """)
+        
+        st.divider()
+        
+        st.markdown("## Reflect: What did you miss?")
+        st.markdown(
+            "Now that you know the correct answer, what features might you have "
+            "overlooked or misinterpreted?"
+        )
+        
+        followup_explanation = st.text_input(
+            f"Your reflection (minimum {MIN_EXPLANATION_LENGTH} characters):",
+            placeholder=(
+                "Describe what features you might have missed or misinterpreted. "
+                "What would you look for differently next time?"
+            ),
+            key=f"followup_{current_pair}"
+        )
+        
+        followup_valid = len(followup_explanation.strip()) >= MIN_EXPLANATION_LENGTH
+        
+        if followup_explanation:
+            if not followup_valid:
+                st.warning(
+                    f"Please provide a more detailed reflection "
+                    f"({len(followup_explanation.strip())}/{MIN_EXPLANATION_LENGTH} characters)"
+                )
+            else:
+                st.success(
+                    f"Reflection valid ({len(followup_explanation.strip())} characters)"
+                )
+        
+        if st.button("Next Pair", type="primary", key="next_incorrect"):
+            if not followup_valid:
+                st.error(
+                    f"Your reflection must be at least {MIN_EXPLANATION_LENGTH} characters "
+                    f"({len(followup_explanation.strip())}/{MIN_EXPLANATION_LENGTH})."
+                )
+            else:
+                annotation = {
+                    "timestamp": datetime.now().isoformat(),
+                    "annotator_id": annotator_id,
+                    "pair_index": int(pair_data['index']),
+                    "image_a": pair_data['A'],
+                    "image_b": pair_data['B'],
+                    "ground_truth": ground_truth,
+                    "celeb_id": str(pair_data['celeb_id']),
+                    "human_decision": decision,
+                    "initial_explanation": initial_explanation,
+                    "is_correct": False,
+                    "followup_explanation": followup_explanation
+                }
                 
                 if save_annotation(sheet, annotation):
-                    # Update local progress and reset submission state
                     st.session_state.completed_local.add(int(pair_data['index']))
                     st.session_state.submitted = False
                     st.rerun()
-        
-        else:
-            # INCORRECT - Reveal and ask for reflection
-            st.error("## Incorrect")
-            
-            st.markdown(f"""
-            ### The ground truth says: **{ground_truth.upper()}**
-            
-            You said **{decision}**, but these faces are actually **{ground_truth}**.
-            """)
-            
-            st.divider()
-            
-            st.markdown("## Reflect: What did you miss?")
-            st.markdown(
-                "Now that you know the correct answer, what features might you have "
-                "overlooked or misinterpreted?"
-            )
-            
-            followup_explanation = st.text_input(
-                f"Your reflection (minimum {MIN_EXPLANATION_LENGTH} characters):",
-                placeholder=(
-                    "Describe what features you might have missed or misinterpreted. "
-                    "What would you look for differently next time?"
-                ),
-                key=f"followup_{current_pair}"
-            )
-            
-            followup_valid = len(followup_explanation.strip()) >= MIN_EXPLANATION_LENGTH
-            
-            if followup_explanation:
-                if not followup_valid:
-                    st.warning(
-                        f"Please provide a more detailed reflection "
-                        f"({len(followup_explanation.strip())}/{MIN_EXPLANATION_LENGTH} characters)"
-                    )
-                else:
-                    st.success(
-                        f"Reflection valid ({len(followup_explanation.strip())} characters)"
-                    )
-            
-            if st.button("Next Pair", type="primary", key="next_incorrect"):
-                if not followup_valid:
-                    st.error(
-                        f"Your reflection must be at least {MIN_EXPLANATION_LENGTH} characters "
-                        f"({len(followup_explanation.strip())}/{MIN_EXPLANATION_LENGTH})."
-                    )
-                else:
-                    annotation = {
-                        "timestamp": datetime.now().isoformat(),
-                        "annotator_id": annotator_id,
-                        "pair_index": int(pair_data['index']),
-                        "image_a": pair_data['A'],
-                        "image_b": pair_data['B'],
-                        "ground_truth": ground_truth,
-                        "celeb_id": str(pair_data['celeb_id']),
-                        "human_decision": decision,
-                        "initial_explanation": initial_explanation,
-                        "is_correct": False,
-                        "followup_explanation": followup_explanation
-                    }
-                    
-                    if save_annotation(sheet, annotation):
-                        st.session_state.completed_local.add(int(pair_data['index']))
-                        st.session_state.submitted = False
-                        st.rerun()
 
 
 # =============================================================================
