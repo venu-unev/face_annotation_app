@@ -22,7 +22,7 @@ import os
 
 # Google Sheets settings
 SPREADSHEET_ID = "1BIwI9Q7m1bXQ-LyMPZx7yzg9w6mq5Lkgb3Gvgq3xKXU"
-CREDENTIALS_FILE = "/home/vshah3/face_annotation_app/gen-lang-client-0135953393-4e1b6b2c93db.json"  # Path to your service account JSON
+CREDENTIALS_FILE = "credentials.json"  # Path to your service account JSON
 
 # Data settings
 PAIRS_CSV = "pairs.csv"
@@ -53,7 +53,7 @@ def get_google_sheet():
                 st.secrets["gcp_service_account"], scopes=scopes
             )
         else:
-            st.error("❌ No credentials found. Please add credentials.json file.")
+            st.error("No credentials found. Please add credentials.json file.")
             return None
         
         client = gspread.authorize(creds)
@@ -70,7 +70,7 @@ def get_google_sheet():
         
         return sheet
     except Exception as e:
-        st.error(f"❌ Could not connect to Google Sheets: {e}")
+        st.error(f"Could not connect to Google Sheets: {e}")
         return None
 
 
@@ -93,7 +93,7 @@ def save_annotation(sheet, annotation_data):
         sheet.append_row(row)
         return True
     except Exception as e:
-        st.error(f"❌ Error saving annotation: {e}")
+        st.error(f"Error saving annotation: {e}")
         return False
 
 
@@ -121,7 +121,7 @@ def load_pairs():
         df = pd.read_csv(PAIRS_CSV)
         return df
     except Exception as e:
-        st.error(f"❌ Could not load pairs CSV: {e}")
+        st.error(f"Could not load pairs CSV: {e}")
         return None
 
 
@@ -140,7 +140,7 @@ def get_image_path(filename):
 def show_instructions():
     """Display the instructions page."""
     st.markdown("""
-    # 📋 Face Identity Annotation Task
+    # Face Identity Annotation Task
     
     ## Instructions
     
@@ -149,17 +149,17 @@ def show_instructions():
     
     ### How it works:
     
-    1. **View the image pair** - You'll see two face images side by side
+    1. **View the image pair** - You will see two face images side by side
     2. **Make your decision** - Are they the same person or different people?
     3. **Explain your reasoning** - Describe what features led to your decision
-    4. **Learn from feedback** - If your answer differs from the ground truth, you'll 
+    4. **Learn from feedback** - If your answer differs from the ground truth, you will 
        be asked to reflect on what you might have missed
     
     ### Tips for good annotations:
     
     - Look at **facial structure**: nose shape, eye spacing, jawline, face shape
     - Consider **distinctive features**: moles, scars, ear shape, eyebrows
-    - Don't be fooled by **changeable features**: hairstyle, lighting, expression, makeup
+    - Do not be fooled by **changeable features**: hairstyle, lighting, expression, makeup
     - When explaining, be **specific** about which features you observed
     
     ### Example of a good explanation:
@@ -177,14 +177,19 @@ def show_instructions():
     
     # Annotator ID input
     annotator_id = st.text_input(
-        "Enter your name or ID to begin:",
+        "Enter your name or ID to begin (minimum 5 characters):",
         placeholder="e.g., john_doe or student_01"
     )
     
-    if st.button("✅ I understand, start annotating", type="primary", disabled=not annotator_id):
-        st.session_state.annotator_id = annotator_id.strip()
-        st.session_state.show_instructions = False
-        st.rerun()
+    # Validate length
+    if annotator_id:
+        if len(annotator_id.strip()) < 5:
+            st.warning("Please enter at least 5 characters for your name or ID.")
+        else:
+            if st.button("I understand, start annotating", type="primary"):
+                st.session_state.annotator_id = annotator_id.strip()
+                st.session_state.show_instructions = False
+                st.rerun()
 
 
 def show_annotation_interface(pairs_df, sheet):
@@ -201,10 +206,10 @@ def show_annotation_interface(pairs_df, sheet):
     
     if not remaining:
         st.balloons()
-        st.success("🎉 You've completed all annotations! Thank you!")
+        st.success("You have completed all annotations! Thank you!")
         st.info(f"Total annotations: {len(completed)}")
         
-        if st.button("🔄 Start over (re-annotate all pairs)"):
+        if st.button("Start over (re-annotate all pairs)"):
             st.session_state.current_pair_idx = 0
             st.rerun()
         return
@@ -227,10 +232,10 @@ def show_annotation_interface(pairs_df, sheet):
         st.markdown(f"**Annotator:** {annotator_id}")
         st.markdown(f"**Pair:** {current_pair}")
         st.divider()
-        if st.button("📖 View Instructions"):
+        if st.button("View Instructions"):
             st.session_state.show_instructions = True
             st.rerun()
-        if st.button("🚪 Switch Annotator"):
+        if st.button("Switch Annotator"):
             st.session_state.annotator_id = None
             st.session_state.show_instructions = True
             st.rerun()
@@ -238,7 +243,7 @@ def show_annotation_interface(pairs_df, sheet):
     # ===================
     # STEP 1: Show images
     # ===================
-    st.markdown("## 👤 Compare these faces")
+    st.markdown("## Compare these faces")
     
     col1, col2 = st.columns(2)
     
@@ -265,7 +270,7 @@ def show_annotation_interface(pairs_df, sheet):
     # ===================
     # STEP 2: Decision
     # ===================
-    st.markdown("## ❓ Are these the same person?")
+    st.markdown("## Are these the same person?")
     
     decision = st.radio(
         "Select your answer:",
@@ -282,16 +287,15 @@ def show_annotation_interface(pairs_df, sheet):
         st.divider()
         
         if decision == "same":
-            st.markdown("## 📝 Why do you think they are the **same person**?")
+            st.markdown("## Why do you think they are the **same person**?")
             placeholder = "Describe the facial features that indicate these are the same person (e.g., nose shape, eye spacing, jawline, distinctive marks)..."
         else:
-            st.markdown("## 📝 Why do you think they are **different people**?")
+            st.markdown("## Why do you think they are **different people**?")
             placeholder = "Describe the facial features that indicate these are different people (e.g., different nose shape, face structure, distinguishing features)..."
         
-        initial_explanation = st.text_area(
+        initial_explanation = st.text_input(
             "Your explanation:",
             placeholder=placeholder,
-            height=120,
             key=f"explanation_{current_pair}"
         )
         
@@ -308,7 +312,7 @@ def show_annotation_interface(pairs_df, sheet):
         if explanation_valid:
             st.divider()
             
-            if st.button("✅ Submit Answer", type="primary", key=f"submit_{current_pair}"):
+            if st.button("Submit Answer", type="primary", key=f"submit_{current_pair}"):
                 # Compare with ground truth
                 ground_truth = pair_data['ground_truth'].lower()
                 is_correct = (decision == ground_truth)
@@ -336,12 +340,12 @@ def show_annotation_interface(pairs_df, sheet):
         
         if is_correct:
             # CORRECT - Simple confirmation and move on
-            st.success("## ✅ Correct!")
+            st.success("## Correct!")
             st.markdown("Your assessment matches the ground truth. Great job!")
             
             followup_explanation = ""  # No followup needed
             
-            if st.button("➡️ Next Pair", type="primary", key="next_correct"):
+            if st.button("Next Pair", type="primary", key="next_correct"):
                 # Save annotation
                 annotation = {
                     "timestamp": datetime.now().isoformat(),
@@ -364,7 +368,7 @@ def show_annotation_interface(pairs_df, sheet):
         
         else:
             # INCORRECT - Reveal and ask for reflection
-            st.error("## ❌ Incorrect")
+            st.error("## Incorrect")
             
             st.markdown(f"""
             ### The ground truth says: **{ground_truth.upper()}**
@@ -374,13 +378,12 @@ def show_annotation_interface(pairs_df, sheet):
             
             st.divider()
             
-            st.markdown("## 🔍 Reflect: What did you miss?")
+            st.markdown("## Reflect: What did you miss?")
             st.markdown("Now that you know the correct answer, what features might you have overlooked or misinterpreted?")
             
-            followup_explanation = st.text_area(
+            followup_explanation = st.text_input(
                 "Your reflection:",
                 placeholder="Describe what features you might have missed or misinterpreted. What would you look for differently next time?",
-                height=120,
                 key=f"followup_{current_pair}"
             )
             
@@ -390,7 +393,7 @@ def show_annotation_interface(pairs_df, sheet):
                 st.warning(f"Please provide a more detailed reflection (at least {min_chars} characters)")
             
             if followup_valid:
-                if st.button("➡️ Next Pair", type="primary", key="next_incorrect"):
+                if st.button("Next Pair", type="primary", key="next_incorrect"):
                     # Save annotation
                     annotation = {
                         "timestamp": datetime.now().isoformat(),
@@ -419,7 +422,7 @@ def show_annotation_interface(pairs_df, sheet):
 def main():
     st.set_page_config(
         page_title="Face Annotation Tool",
-        page_icon="👤",
+        page_icon="",
         layout="wide"
     )
     
@@ -440,7 +443,7 @@ def main():
     # Connect to Google Sheets
     sheet = get_google_sheet()
     if sheet is None:
-        st.warning("⚠️ Running without Google Sheets. Annotations will not be saved.")
+        st.warning("Running without Google Sheets. Annotations will not be saved.")
     
     # Show appropriate page
     if st.session_state.show_instructions or st.session_state.annotator_id is None:
