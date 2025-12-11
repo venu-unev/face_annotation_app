@@ -25,7 +25,7 @@ SPREADSHEET_ID = "1BIwI9Q7m1bXQ-LyMPZx7yzg9w6mq5Lkgb3Gvgq3xKXU"
 CREDENTIALS_FILE = "/home/vshah3/face_annotation_app/gen-lang-client-0135953393-4e1b6b2c93db.json"  # Path to your service account JSON
 
 # Data settings
-PAIRS_CSV = "/home/vshah3/celeba/verification_task/pairs_metadata.csv"
+PAIRS_CSV = "pairs.csv"
 IMAGE_BASE_PATH = "/home/vshah3/celeba/verification_task/images/"
 
 # If using URLs for images (e.g., from a server), set this to True
