@@ -80,6 +80,10 @@ def get_google_sheet():
 
 def save_annotation(sheet, annotation_data):
     """Save a single annotation to Google Sheets."""
+    if sheet is None:
+        st.error("Cannot save annotation: Google Sheets is not available.")
+        return False
+
     try:
         row = [
             annotation_data.get("timestamp", ""),
@@ -102,15 +106,21 @@ def save_annotation(sheet, annotation_data):
 
 
 def get_completed_pairs(sheet, annotator_id):
-    """Get list of pair indices already completed by this annotator."""
+    """Get list of pair indices already completed by this annotator from Google Sheets."""
+    if sheet is None or not annotator_id:
+        return []
     try:
         records = sheet.get_all_records()
-        completed = [
-            r["pair_index"] for r in records 
-            if r.get("annotator_id") == annotator_id
-        ]
+        completed = []
+        for r in records:
+            if r.get("annotator_id") == annotator_id:
+                try:
+                    completed.append(int(r["pair_index"]))
+                except (ValueError, TypeError, KeyError):
+                    # Skip rows with bad/missing data
+                    continue
         return completed
-    except:
+    except Exception:
         return []
 
 
@@ -140,6 +150,26 @@ def get_image_path(filename):
 # =============================================================================
 # UI COMPONENTS
 # =============================================================================
+
+def ensure_local_progress_initialized(sheet, pairs_df):
+    """
+    Ensure st.session_state.completed_local exists and is initialized from
+    Google Sheets for the current annotator (hybrid model).
+    """
+    annotator_id = st.session_state.annotator_id
+    if "completed_local" not in st.session_state:
+        if annotator_id and sheet is not None:
+            from_sheet = get_completed_pairs(sheet, annotator_id)
+            st.session_state.completed_local = set(from_sheet)
+        else:
+            st.session_state.completed_local = set()
+    
+    # Optionally enforce only valid indices
+    valid_indices = set(pairs_df["index"].tolist())
+    st.session_state.completed_local = {
+        i for i in st.session_state.completed_local if i in valid_indices
+    }
+
 
 def show_instructions(pairs_df, sheet):
     """Display the instructions page."""
@@ -179,15 +209,14 @@ def show_instructions(pairs_df, sheet):
     
     st.divider()
     
-    # Check if user already has a stored ID - show their progress
+    # If we already have an annotator, show their progress
     if st.session_state.annotator_id:
-        # Get their progress
-        completed = get_completed_pairs(sheet, st.session_state.annotator_id)
+        ensure_local_progress_initialized(sheet, pairs_df)
+        completed = st.session_state.completed_local
         total = len(pairs_df)
         
         st.info(f"Welcome back, **{st.session_state.annotator_id}**!")
         
-        # Show progress bar even on instructions page
         progress = len(completed) / total if total > 0 else 0
         st.progress(progress)
         st.caption(f"Your progress: {len(completed)} / {total} pairs completed")
@@ -206,38 +235,50 @@ def show_instructions(pairs_df, sheet):
         key="annotator_input"
     )
     
-    # Validate length
     name_valid = len(annotator_id.strip()) >= MIN_NAME_LENGTH
     
-    if annotator_id and not name_valid:
-        st.warning(f"Please enter at least {MIN_NAME_LENGTH} characters ({len(annotator_id.strip())}/{MIN_NAME_LENGTH})")
-    elif annotator_id and name_valid:
-        st.success(f"Name valid ({len(annotator_id.strip())} characters)")
+    if annotator_id:
+        if not name_valid:
+            st.warning(
+                f"Please enter at least {MIN_NAME_LENGTH} characters "
+                f"({len(annotator_id.strip())}/{MIN_NAME_LENGTH})"
+            )
+        else:
+            st.success(f"Name valid ({len(annotator_id.strip())} characters)")
     
-    # Button always visible, disabled if invalid
-    if st.button("I understand, start annotating", type="primary", disabled=not name_valid):
-        st.session_state.annotator_id = annotator_id.strip()
-        st.session_state.show_instructions = False
-        # Reset current pair index so it recalculates from completed pairs
-        if 'current_pair_idx' in st.session_state:
-            del st.session_state.current_pair_idx
-        st.rerun()
+    # Button always enabled; validate when clicked
+    if st.button("I understand, start annotating", type="primary"):
+        if not name_valid:
+            st.error(f"Your name/ID must be at least {MIN_NAME_LENGTH} characters.")
+        else:
+            st.session_state.annotator_id = annotator_id.strip()
+            # Initialize local progress from Google Sheets exactly once at login
+            if sheet is not None:
+                from_sheet = get_completed_pairs(sheet, st.session_state.annotator_id)
+                st.session_state.completed_local = set(from_sheet)
+            else:
+                st.session_state.completed_local = set()
+            
+            st.session_state.show_instructions = False
+            
+            # Reset any submission state
+            st.session_state.submitted = False
+            if 'current_pair_idx' in st.session_state:
+                del st.session_state.current_pair_idx
+            
+            st.rerun()
 
 
 def show_annotation_interface(pairs_df, sheet):
     """Display the main annotation interface."""
     
-    # Get current annotator
     annotator_id = st.session_state.annotator_id
+    ensure_local_progress_initialized(sheet, pairs_df)
     
-    # Get completed pairs for this annotator (fetch fresh each time)
-    completed = get_completed_pairs(sheet, annotator_id)
-    
-    # Find next pair to annotate
+    completed = st.session_state.completed_local
     all_pairs = pairs_df['index'].tolist()
     remaining = [i for i in all_pairs if i not in completed]
     
-    # Calculate progress
     total = len(all_pairs)
     num_completed = len(completed)
     progress = num_completed / total if total > 0 else 0
@@ -250,7 +291,8 @@ def show_annotation_interface(pairs_df, sheet):
         st.success("You have completed all annotations! Thank you!")
         
         if st.button("Start over (re-annotate all pairs)"):
-            st.session_state.current_pair_idx = 0
+            st.session_state.completed_local = set()
+            st.session_state.submitted = False
             st.rerun()
         return
     
@@ -270,6 +312,10 @@ def show_annotation_interface(pairs_df, sheet):
         if st.button("Switch Annotator"):
             st.session_state.annotator_id = None
             st.session_state.show_instructions = True
+            # Clear progress and submission state
+            if "completed_local" in st.session_state:
+                del st.session_state.completed_local
+            st.session_state.submitted = False
             st.rerun()
     
     # ===================
@@ -284,7 +330,7 @@ def show_annotation_interface(pairs_df, sheet):
         image_a_path = get_image_path(pair_data['A'])
         try:
             st.image(image_a_path, use_container_width=True)
-        except:
+        except Exception:
             st.error(f"Could not load image: {image_a_path}")
         st.caption(f"`{pair_data['A']}`")
     
@@ -293,7 +339,7 @@ def show_annotation_interface(pairs_df, sheet):
         image_b_path = get_image_path(pair_data['B'])
         try:
             st.image(image_b_path, use_container_width=True)
-        except:
+        except Exception:
             st.error(f"Could not load image: {image_b_path}")
         st.caption(f"`{pair_data['B']}`")
     
@@ -319,10 +365,16 @@ def show_annotation_interface(pairs_df, sheet):
     
     if decision == "same":
         st.markdown("## Why do you think they are the **same person**?")
-        placeholder = "Describe the facial features that indicate these are the same person (e.g., nose shape, eye spacing, jawline, distinctive marks)..."
+        placeholder = (
+            "Describe the facial features that indicate these are the same person "
+            "(e.g., nose shape, eye spacing, jawline, distinctive marks)..."
+        )
     elif decision == "different":
         st.markdown("## Why do you think they are **different people**?")
-        placeholder = "Describe the facial features that indicate these are different people (e.g., different nose shape, face structure, distinguishing features)..."
+        placeholder = (
+            "Describe the facial features that indicate these are different people "
+            "(e.g., different nose shape, face structure, distinguishing features)..."
+        )
     else:
         st.markdown("## Explain your reasoning")
         placeholder = "First select whether they are the same or different person above..."
@@ -334,35 +386,43 @@ def show_annotation_interface(pairs_df, sheet):
         disabled=(decision is None)
     )
     
-    # Check if explanation is sufficient
     explanation_valid = len(initial_explanation.strip()) >= MIN_EXPLANATION_LENGTH
     
-    if initial_explanation and not explanation_valid:
-        st.warning(f"Please provide a more detailed explanation ({len(initial_explanation.strip())}/{MIN_EXPLANATION_LENGTH} characters)")
-    elif initial_explanation and explanation_valid:
-        st.success(f"Explanation valid ({len(initial_explanation.strip())} characters)")
+    if initial_explanation:
+        if not explanation_valid:
+            st.warning(
+                f"Please provide a more detailed explanation "
+                f"({len(initial_explanation.strip())}/{MIN_EXPLANATION_LENGTH} characters)"
+            )
+        else:
+            st.success(
+                f"Explanation valid ({len(initial_explanation.strip())} characters)"
+            )
+    
+    st.divider()
     
     # ===================
     # STEP 4: Submit and compare
     # ===================
-    st.divider()
-    
-    # Determine if form is complete
-    form_valid = decision is not None and explanation_valid
-    
-    if st.button("Submit Answer", type="primary", key=f"submit_{current_pair}", disabled=not form_valid):
-        # Compare with ground truth
-        ground_truth = pair_data['ground_truth'].lower()
-        is_correct = (decision == ground_truth)
-        
-        # Store in session state for reveal
-        st.session_state.submitted = True
-        st.session_state.is_correct = is_correct
-        st.session_state.ground_truth = ground_truth
-        st.session_state.decision = decision
-        st.session_state.initial_explanation = initial_explanation
-        st.session_state.pair_data = pair_data
-        st.rerun()
+    if st.button("Submit Answer", type="primary", key=f"submit_{current_pair}"):
+        if decision is None:
+            st.error("Please select whether these are the same person or different people before submitting.")
+        elif not explanation_valid:
+            st.error(
+                f"Your explanation must be at least {MIN_EXPLANATION_LENGTH} characters "
+                f"({len(initial_explanation.strip())}/{MIN_EXPLANATION_LENGTH})."
+            )
+        else:
+            ground_truth = str(pair_data['ground_truth']).lower()
+            is_correct = (decision == ground_truth)
+            
+            st.session_state.submitted = True
+            st.session_state.is_correct = is_correct
+            st.session_state.ground_truth = ground_truth
+            st.session_state.decision = decision
+            st.session_state.initial_explanation = initial_explanation
+            st.session_state.pair_data = pair_data
+            st.rerun()
     
     # ===================
     # STEP 5: Reveal and reflect (if submitted)
@@ -382,7 +442,6 @@ def show_annotation_interface(pairs_df, sheet):
             st.markdown("Your assessment matches the ground truth. Great job!")
             
             if st.button("Next Pair", type="primary", key="next_correct"):
-                # Save annotation
                 annotation = {
                     "timestamp": datetime.now().isoformat(),
                     "annotator_id": annotator_id,
@@ -398,6 +457,8 @@ def show_annotation_interface(pairs_df, sheet):
                 }
                 
                 if save_annotation(sheet, annotation):
+                    # Update local progress and reset submission state
+                    st.session_state.completed_local.add(int(pair_data['index']))
                     st.session_state.submitted = False
                     st.rerun()
         
@@ -414,40 +475,58 @@ def show_annotation_interface(pairs_df, sheet):
             st.divider()
             
             st.markdown("## Reflect: What did you miss?")
-            st.markdown("Now that you know the correct answer, what features might you have overlooked or misinterpreted?")
+            st.markdown(
+                "Now that you know the correct answer, what features might you have "
+                "overlooked or misinterpreted?"
+            )
             
             followup_explanation = st.text_input(
                 f"Your reflection (minimum {MIN_EXPLANATION_LENGTH} characters):",
-                placeholder="Describe what features you might have missed or misinterpreted. What would you look for differently next time?",
+                placeholder=(
+                    "Describe what features you might have missed or misinterpreted. "
+                    "What would you look for differently next time?"
+                ),
                 key=f"followup_{current_pair}"
             )
             
             followup_valid = len(followup_explanation.strip()) >= MIN_EXPLANATION_LENGTH
             
-            if followup_explanation and not followup_valid:
-                st.warning(f"Please provide a more detailed reflection ({len(followup_explanation.strip())}/{MIN_EXPLANATION_LENGTH} characters)")
-            elif followup_explanation and followup_valid:
-                st.success(f"Reflection valid ({len(followup_explanation.strip())} characters)")
+            if followup_explanation:
+                if not followup_valid:
+                    st.warning(
+                        f"Please provide a more detailed reflection "
+                        f"({len(followup_explanation.strip())}/{MIN_EXPLANATION_LENGTH} characters)"
+                    )
+                else:
+                    st.success(
+                        f"Reflection valid ({len(followup_explanation.strip())} characters)"
+                    )
             
-            if st.button("Next Pair", type="primary", key="next_incorrect", disabled=not followup_valid):
-                # Save annotation
-                annotation = {
-                    "timestamp": datetime.now().isoformat(),
-                    "annotator_id": annotator_id,
-                    "pair_index": int(pair_data['index']),
-                    "image_a": pair_data['A'],
-                    "image_b": pair_data['B'],
-                    "ground_truth": ground_truth,
-                    "celeb_id": str(pair_data['celeb_id']),
-                    "human_decision": decision,
-                    "initial_explanation": initial_explanation,
-                    "is_correct": False,
-                    "followup_explanation": followup_explanation
-                }
-                
-                if save_annotation(sheet, annotation):
-                    st.session_state.submitted = False
-                    st.rerun()
+            if st.button("Next Pair", type="primary", key="next_incorrect"):
+                if not followup_valid:
+                    st.error(
+                        f"Your reflection must be at least {MIN_EXPLANATION_LENGTH} characters "
+                        f"({len(followup_explanation.strip())}/{MIN_EXPLANATION_LENGTH})."
+                    )
+                else:
+                    annotation = {
+                        "timestamp": datetime.now().isoformat(),
+                        "annotator_id": annotator_id,
+                        "pair_index": int(pair_data['index']),
+                        "image_a": pair_data['A'],
+                        "image_b": pair_data['B'],
+                        "ground_truth": ground_truth,
+                        "celeb_id": str(pair_data['celeb_id']),
+                        "human_decision": decision,
+                        "initial_explanation": initial_explanation,
+                        "is_correct": False,
+                        "followup_explanation": followup_explanation
+                    }
+                    
+                    if save_annotation(sheet, annotation):
+                        st.session_state.completed_local.add(int(pair_data['index']))
+                        st.session_state.submitted = False
+                        st.rerun()
 
 
 # =============================================================================
