@@ -345,7 +345,7 @@ def show_annotation_interface(pairs_df, sheet):
                 st.image(image_a_path, width=320)
             except Exception:
                 st.error(f"Could not load image: {image_a_path}")
-            st.caption(f"`{pair_data['A']}`")
+            #st.caption(f"`{pair_data['A']}`")
         with img_col2:
             st.markdown("**Face B**")
             image_b_path = get_image_path(pair_data['B'])
@@ -353,7 +353,7 @@ def show_annotation_interface(pairs_df, sheet):
                 st.image(image_b_path, width=320)
             except Exception:
                 st.error(f"Could not load image: {image_b_path}")
-            st.caption(f"`{pair_data['B']}`")
+            #st.caption(f"`{pair_data['B']}`")
     
     st.markdown("---")
     
