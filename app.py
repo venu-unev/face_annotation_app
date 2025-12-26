@@ -173,41 +173,54 @@ def ensure_local_progress_initialized(sheet, pairs_df):
 
 def show_instructions(pairs_df, sheet):
     """Display the instructions page."""
+
+    # ---------- Top instructions ----------
     st.markdown("""
-    # Face Identity Annotation Task
-    
-    ## Instructions
-    
-    Welcome! Your task is to determine whether two face images show the **same person** 
-    or **different people**, and explain your reasoning.
-    
-    ### How it works:
-    
-    1. **View the image pair** - You will see two face images side by side
-    2. **Make your decision** - Are they the same person or different people?
-    3. **Explain your reasoning** - Describe what features led to your decision
-    4. **Learn from feedback** - If your answer differs from the ground truth, you will 
-       be asked to reflect on what you might have missed
-    
-    ### Tips for good annotations:
-    
-    - Look at **facial structure**: nose shape, eye spacing, jawline, face shape
-    - Consider **distinctive features**: moles, scars, ear shape, eyebrows
-    - Do not be fooled by **changeable features**: hairstyle, lighting, expression, makeup
-    - When explaining, be **specific** about which features you observed
-    
-    ### Example of a good explanation:
-    
-    > *"These appear to be the same person. The nose bridge width and nostril shape 
-    > are identical. The eye spacing and brow ridge structure match. Despite different 
-    > lighting, the jawline contour is consistent."*
-    
-    ---
-    
-    *Your annotations will be saved automatically. You can take breaks and continue later.*
-    """)
-    
+# Face Identity Annotation Task
+
+## Instructions
+
+You will review **two face images** and decide whether they show the **same person** or **different people**.
+After choosing, you must briefly explain *which visual evidence* informed your decision.
+
+### Workflow
+
+1. **Inspect both images carefully** (side-by-side).
+2. **Select a label**: *Same person* or *Different people*.
+3. **Write a short justification** citing specific facial cues.
+4. **Review feedback** if your answer differs from the ground truth.
+""")
+
+    # ---------- Instruction image ----------
+    img_path = Path(__file__).parent / "image.jpeg"
+    if img_path.exists():
+        st.image(str(img_path), use_container_width=True)
+    else:
+        st.warning(f"Instruction image not found: {img_path}")
+
+    # ---------- Remaining instructions ----------
+    st.markdown("""
+### What to focus on
+
+- **Stable facial geometry**: face shape, jawline, cheekbones, eye spacing, nose shape, lip structure
+- **Distinctive markers**: scars, moles, freckles, eyebrow shape, ear shape, asymmetries
+
+### What to be cautious about
+
+- **Changeable factors**: hairstyle, facial hair, makeup, lighting, expression, camera angle
+- Apparent differences caused by image quality or pose
+
+### Example justification (strong)
+
+> “Same person. The nose bridge and nostril shape match closely, and the eye spacing and brow shape are consistent. Lighting differs, but the jawline contour and cheekbone structure align.”
+
+---
+
+*Your progress is saved automatically. You may stop and resume later.*
+""")
+
     st.divider()
+
     
     # If we already have an annotator, show their progress
     if st.session_state.annotator_id:
