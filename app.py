@@ -173,86 +173,122 @@ def ensure_local_progress_initialized(sheet, pairs_df):
     }
 
 
+from pathlib import Path
+import streamlit as st
+
 def show_instructions(pairs_df, sheet):
     """Display the instructions page."""
 
-    # ---------- Top instructions ----------
     st.markdown("""
 # Face Identity Annotation Task
 
-## Instructions
-
-You will review **two face images** and decide whether they show the **same person** or **different people**.
-After choosing, you must briefly explain *which visual evidence* informed your decision.
-
-### Workflow
-
-1. **Inspect both images carefully** (side-by-side).
-2. **Select a label**: *Same person* or *Different people*.
-3. **Write a short justification** citing specific facial cues.
-4. **Review feedback** if your answer differs from the ground truth.
+Decide if two face photos show the **Same person** or **Different people**, then write **1–3 sentences** explaining *which facial evidence* supports your choice.
 """)
 
-    # ---------- Instruction image ----------
+    # Compact workflow + key rule
+    c1, c2 = st.columns([1.1, 1.2], gap="large")
+
+    with c1:
+        st.markdown("""
+### Workflow (fast checklist)
+1. Compare both faces (side-by-side).
+2. Choose **Same** or **Different**.
+3. Justify using **specific facial parts** (not vague impressions).
+4. If feedback disagrees, reflect on what you missed.
+""")
+
+    with c2:
+        st.markdown("""
+### Key rule
+Prefer **stable structure** over changeable appearance.
+
+**Structure (good evidence):** face shape, jawline, cheekbones, eye spacing, nose/lip shape, ears  
+**Appearance (weak evidence):** hair, makeup, lighting, expression, camera angle, image quality
+""")
+
+    st.markdown("---")
+
+    # Image + context, compact side-by-side
     img_path = Path("image.jpeg")
+    ic1, ic2 = st.columns([1, 1.2], gap="large")
 
-    if img_path.exists():
-        st.image(str(img_path), use_container_width=True)
-    else:
-        st.error("Instruction image `image.jpeg` not found in app directory.")
+    with ic1:
+        if img_path.exists():
+            st.image(str(img_path), use_container_width=True)
+            st.caption("Reference: facial regions that often carry identity signal.")
+        else:
+            st.error("Instruction image `image.jpeg` not found in app directory.")
 
-    # ---------- Remaining instructions ----------
-    st.markdown("""
-### What to focus on
+    with ic2:
+        st.markdown("""
+### Use this guide while comparing
+When deciding, actively check **multiple** regions shown in the diagram:
 
-- **Stable facial geometry**: face shape, jawline, cheekbones, eye spacing, nose shape, lip structure
-- **Distinctive markers**: scars, moles, freckles, eyebrow shape, ear shape, asymmetries
+- **Eyes & brows:** spacing, brow shape, eyelid fold, lash line
+- **Nose:** bridge width, tip shape, nostril shape
+- **Mouth & lips:** lip thickness, cupid’s bow, mouth corners
+- **Face structure:** jawline, chin shape, cheekbone prominence
+- **Ears (high value):** outer rim shape, earlobe attachment
 
-### What to be cautious about
+Aim to cite **2–4 concrete cues** in your explanation.
+""")
 
-- **Changeable factors**: hairstyle, facial hair, makeup, lighting, expression, camera angle
-- Apparent differences caused by image quality or pose
+    st.markdown("---")
 
-### Example justification (strong)
+    # Examples: Same vs Different
+    e1, e2 = st.columns(2, gap="large")
 
-> “Same person. The nose bridge and nostril shape match closely, and the eye spacing and brow shape are consistent. Lighting differs, but the jawline contour and cheekbone structure align.”
+    with e1:
+        st.markdown("""
+### Example — Same person (strong)
+> “Same person. The eye spacing and brow shape match closely, and the nose bridge width with the nostril shape is consistent. Despite lighting differences, the jawline contour and chin shape align.”
+""")
 
----
+    with e2:
+        st.markdown("""
+### Example — Different people (strong)
+> “Different people. The nose tip and nostril shape differ (one is narrower with a sharper tip), and the eye spacing is noticeably wider in the second image. The jawline is more angular in the first face, while the second has a rounder chin and fuller cheeks.”
+""")
 
-*Your progress is saved automatically. You may stop and resume later.*
+    # Optional: keep extra tips compact inside an expander
+    with st.expander("Optional tips for tricky cases"):
+        st.markdown("""
+- If one image is low quality or angled, **downweight** surface details and rely more on **global structure** (jaw/chin/cheekbones).
+- Don’t over-trust hairline, beard, makeup, or expression.
+- If uncertain, explain what conflicts (e.g., “eyes match but jawline differs”).
 """)
 
     st.divider()
 
-    
+    # --- rest of your existing function continues unchanged below ---
     # If we already have an annotator, show their progress
     if st.session_state.annotator_id:
         ensure_local_progress_initialized(sheet, pairs_df)
         completed = st.session_state.completed_local
         total = len(pairs_df)
-        
+
         st.info(f"Welcome back, **{st.session_state.annotator_id}**!")
-        
+
         progress = len(completed) / total if total > 0 else 0
         st.progress(progress)
         st.caption(f"Your progress: {len(completed)} / {total} pairs completed")
-        
+
         if st.button("Continue Annotating", type="primary"):
             st.session_state.show_instructions = False
             st.rerun()
-        
+
         st.divider()
         st.markdown("##### Switch to a different user:")
-    
+
     # Annotator ID input
     annotator_id = st.text_input(
         f"Enter your name or ID (minimum {MIN_NAME_LENGTH} characters):",
         placeholder="e.g., john_doe or student_01",
         key="annotator_input"
     )
-    
+
     name_valid = len(annotator_id.strip()) >= MIN_NAME_LENGTH
-    
+
     if annotator_id:
         if not name_valid:
             st.warning(
@@ -261,28 +297,25 @@ After choosing, you must briefly explain *which visual evidence* informed your d
             )
         else:
             st.success(f"Name valid ({len(annotator_id.strip())} characters)")
-    
-    # Button always enabled; validate when clicked
+
     if st.button("I understand, start annotating", type="primary"):
         if not name_valid:
             st.error(f"Your name/ID must be at least {MIN_NAME_LENGTH} characters.")
         else:
             st.session_state.annotator_id = annotator_id.strip()
-            # Initialize local progress from Google Sheets exactly once at login
             if sheet is not None:
                 from_sheet = get_completed_pairs(sheet, st.session_state.annotator_id)
                 st.session_state.completed_local = set(from_sheet)
             else:
                 st.session_state.completed_local = set()
-            
+
             st.session_state.show_instructions = False
-            
-            # Reset any submission state
             st.session_state.submitted = False
             if 'current_pair_idx' in st.session_state:
                 del st.session_state.current_pair_idx
-            
+
             st.rerun()
+
 
 
 def show_annotation_interface(pairs_df, sheet):
