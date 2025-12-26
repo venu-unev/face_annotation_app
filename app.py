@@ -192,11 +192,12 @@ After choosing, you must briefly explain *which visual evidence* informed your d
 """)
 
     # ---------- Instruction image ----------
-    img_path = Path(__file__).parent / "image.jpeg"
+    img_path = Path("image.jpeg")
+
     if img_path.exists():
         st.image(str(img_path), use_container_width=True)
     else:
-        st.warning(f"Instruction image not found: {img_path}")
+        st.error("Instruction image `image.jpeg` not found in app directory.")
 
     # ---------- Remaining instructions ----------
     st.markdown("""
