@@ -15,6 +15,8 @@ import gspread
 from google.oauth2.service_account import Credentials
 import json
 import os
+from pathlib import Path
+
 
 # =============================================================================
 # CONFIGURATION - Edit these settings as needed
