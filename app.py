@@ -16,6 +16,8 @@ from google.oauth2.service_account import Credentials
 import os
 from pathlib import Path
 
+APP_ROOT = Path(__file__).resolve().parent
+
 
 # =============================================================================
 # CONFIGURATION - Edit these settings as needed
@@ -222,7 +224,7 @@ Prefer **stable structure** over changeable appearance.
     st.markdown("---")
 
     # Image + context, compact side-by-side
-    img_path = Path("image.jpeg")
+    img_path = Path("types/image.jpeg")
     ic1, ic2 = st.columns([1, 1.2], gap="large")
 
     with ic1:
@@ -245,6 +247,29 @@ When deciding, actively check **multiple** regions shown in the diagram:
 
 Aim to cite **2–4 concrete cues** in your explanation.
 """)
+
+        # --- Visual reference grid: facial feature types ---
+    st.markdown("### Visual references (use these while annotating)")
+    st.caption(
+        "While comparing a pair, actively cross-check these example feature types (eyes, nose, chin, face shape). "
+        "They are intended to help you describe *specific* differences or matches."
+    )
+
+    types_paths = [
+        ("Eyes", Path("types/eye.jpg")),
+        ("Nose", Path("types/nose.png")),
+        ("Chin", Path("types/chin.jpg")),
+        ("Face shape", Path("types/face.jpg")),
+    ]
+
+    # 2x2 grid (change to 3 or 4 columns if you want it tighter)
+    cols = st.columns(2, gap="medium")
+    for i, (label, p) in enumerate(types_paths):
+        with cols[i % 2]:
+            if p.exists():
+                st.image(str(p), caption=label, use_container_width=True)
+            else:
+                st.warning(f"Missing: {p}")
 
     st.markdown("---")
 
