@@ -249,10 +249,10 @@ Aim to cite **2–4 concrete cues** in your explanation.
 """)
 
         # --- Visual reference grid: facial feature types ---
-    st.markdown("### Visual references (use these while annotating)")
+    st.markdown("### Visual references")
     st.caption(
-        "While comparing a pair, actively cross-check these example feature types (eyes, nose, chin, face shape). "
-        "They are intended to help you describe *specific* differences or matches."
+        "While comparing a pair, you may cross-check these example feature types (eyes, nose, chin, face shape). "
+        "They are intended to help you describe *specific* differences or matches, especially in subtle cases where the persons may appear to be doppelgangers. Use this as a reference, not a strict comparison guide"
     )
 
     types_paths = [
@@ -747,8 +747,8 @@ def show_annotation_interface(pairs_df, sheet):
             f"**Your answer:** {decision}"
         )
         st.markdown(
-            "Now that you know the correct answer, what features might you have "
-            "overlooked or misinterpreted?"
+            f"Now that you know the correct answer, can you write a new explanation "
+            f"to describe why these images may be **{ground_truth.upper()}**?"
         )
 
         followup_explanation = st.text_area(
