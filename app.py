@@ -257,7 +257,7 @@ Aim to cite **2–4 concrete cues** in your explanation.
 
     types_paths = [
         ("Eyes", Path("types/eyes.jpg")),
-        ("Nose", Path("types/nose.png")),
+        ("Nose", Path("types/nose.jpg")),
         ("Chin", Path("types/chin.jpg")),
         ("Face shape", Path("types/face.jpg")),
     ]
