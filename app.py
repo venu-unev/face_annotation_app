@@ -181,19 +181,18 @@ def render_sidebar_guidance():
 
     st.markdown(
         """
-**If SAME:** identify *what* matches (2–4 cues)
+**If SAME:** identify *what* matches (2–4 cues). Don't just say 'eyes look similar'. Emphasize on what characteristic of eyes makes them same.
 - Eye spacing / eyelid fold / brow shape  
 - Nose bridge/tip/nostrils  
 - Jawline / chin shape / cheekbones  
-- Ears (often high-value)
+- Ears
 
-**If DIFFERENT:** identify *what* conflicts (2–4 cues)
+**If DIFFERENT:** identify *what* conflicts (2–4 cues). Try to describe and articulate the difference.
 - Nose shape differences (bridge width, tip, nostrils)  
 - Eye spacing / brow geometry  
 - Jaw/chin geometry, cheek fullness (structure, not expression)  
 - Ear rim / lobe attachment
 
-**Tricky cases:** downweight hair, makeup, lighting, pose, expression.
         """
     )
 
