@@ -171,6 +171,62 @@ def infer_dataset_prefix(filename: str) -> str:
 # UI COMPONENTS
 # =============================================================================
 
+def render_sidebar_guidance():
+    """
+    Sidebar guidance: compact prompts + clickable-enlarge thumbnails.
+    Uses the same assets as the instructions page.
+    """
+    st.markdown("#### Guidance")
+    st.caption("Keep this open while annotating. Prefer stable structure over appearance.")
+
+    # Quick prompts (what you asked for)
+    st.markdown(
+        """
+**If you think SAME:**
+- What *stable* parts match? (eye spacing, brow shape, nose bridge/tip, jawline, chin)
+- Can you cite **2–4 concrete cues** that align across both images?
+
+**If you think DIFFERENT:**
+- Which stable parts conflict? (nose shape, eye spacing, jaw/chin geometry, ears)
+- Are differences consistent across multiple regions (not just hair/lighting/expression)?
+
+**When it’s tricky:**
+- Downweight hair, makeup, lighting, pose, expression.
+- If one image is angled/low quality, rely on global structure (jaw/chin/cheekbones).
+        """
+    )
+
+    st.divider()
+    st.markdown("#### Visual guides")
+
+    # Main diagram reference
+    main_ref = Path("types/image.jpeg")
+    if main_ref.exists():
+        st.image(str(main_ref), caption="Facial regions reference", width=180)
+        with st.expander("Enlarge: Facial regions reference"):
+            st.image(str(main_ref), use_container_width=True)
+    else:
+        st.warning("Missing: types/image.jpeg")
+
+    # Feature-type references (thumbnails + enlarge)
+    types_paths = [
+        ("Eyes", Path("types/eyes.jpg")),
+        ("Nose", Path("types/nose.jpg")),
+        ("Chin", Path("types/chin.jpg")),
+        ("Face shape", Path("types/face.jpg")),
+    ]
+
+    cols = st.columns(2, gap="small")
+    for i, (label, p) in enumerate(types_paths):
+        with cols[i % 2]:
+            if p.exists():
+                st.image(str(p), caption=label, width=140)
+                with st.expander(f"Enlarge: {label}"):
+                    st.image(str(p), use_container_width=True)
+            else:
+                st.caption(f"Missing: {p}")
+
+
 def ensure_local_progress_initialized(sheet, pairs_df):
     """
     Ensure st.session_state.completed_local exists and is initialized from
@@ -595,16 +651,22 @@ def show_annotation_interface(pairs_df, sheet):
     review_mode = st.session_state.get("submitted", False)
 
     # Sidebar (minimal)
+    # Sidebar (guidance + session controls)
     with st.sidebar:
+        render_sidebar_guidance()
+
+        st.divider()
         st.markdown("#### Session")
         st.markdown(f"**Annotator:** {annotator_id}")
         st.markdown(f"**Current Pair:** `{current_pair}`")
         st.markdown(f"**Completed:** {num_completed} / {total}")
 
         st.divider()
-        if st.button("View Instructions"):
+        # Rename "View Instructions" -> "Home"
+        if st.button("Home"):
             st.session_state.show_instructions = True
             st.rerun()
+
         if st.button("Switch Annotator"):
             st.session_state.annotator_id = None
             st.session_state.show_instructions = True
@@ -612,6 +674,7 @@ def show_annotation_interface(pairs_df, sheet):
                 del st.session_state.completed_local
             st.session_state.submitted = False
             st.rerun()
+
 
     st.markdown("#### 1. Compare these faces")
 
