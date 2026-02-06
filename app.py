@@ -173,42 +173,41 @@ def infer_dataset_prefix(filename: str) -> str:
 
 def render_sidebar_guidance():
     """
-    Sidebar guidance: compact prompts + clickable-enlarge thumbnails.
+    Sidebar guidance: prompts + full-width images (no thumbnails/expanders).
     Uses the same assets as the instructions page.
     """
     st.markdown("#### Guidance")
-    st.caption("Keep this open while annotating. Prefer stable structure over appearance.")
+    st.caption("Prefer stable structure over appearance.")
 
-    # Quick prompts (what you asked for)
     st.markdown(
         """
-**If you think SAME:**
-- What *stable* parts match? (eye spacing, brow shape, nose bridge/tip, jawline, chin)
-- Can you cite **2–4 concrete cues** that align across both images?
+**If SAME:** identify *what* matches (2–4 cues)
+- Eye spacing / eyelid fold / brow shape  
+- Nose bridge/tip/nostrils  
+- Jawline / chin shape / cheekbones  
+- Ears (often high-value)
 
-**If you think DIFFERENT:**
-- Which stable parts conflict? (nose shape, eye spacing, jaw/chin geometry, ears)
-- Are differences consistent across multiple regions (not just hair/lighting/expression)?
+**If DIFFERENT:** identify *what* conflicts (2–4 cues)
+- Nose shape differences (bridge width, tip, nostrils)  
+- Eye spacing / brow geometry  
+- Jaw/chin geometry, cheek fullness (structure, not expression)  
+- Ear rim / lobe attachment
 
-**When it’s tricky:**
-- Downweight hair, makeup, lighting, pose, expression.
-- If one image is angled/low quality, rely on global structure (jaw/chin/cheekbones).
+**Tricky cases:** downweight hair, makeup, lighting, pose, expression.
         """
     )
 
     st.divider()
     st.markdown("#### Visual guides")
 
-    # Main diagram reference
+    # Main diagram reference (render full width of sidebar)
     main_ref = Path("types/image.jpeg")
     if main_ref.exists():
-        st.image(str(main_ref), caption="Facial regions reference", width=180)
-        with st.expander("Enlarge: Facial regions reference"):
-            st.image(str(main_ref), use_container_width=True)
+        st.image(str(main_ref), caption="Facial regions reference", use_container_width=True)
     else:
         st.warning("Missing: types/image.jpeg")
 
-    # Feature-type references (thumbnails + enlarge)
+    # Feature-type references (render full width as well)
     types_paths = [
         ("Eyes", Path("types/eyes.jpg")),
         ("Nose", Path("types/nose.jpg")),
@@ -216,15 +215,12 @@ def render_sidebar_guidance():
         ("Face shape", Path("types/face.jpg")),
     ]
 
-    cols = st.columns(2, gap="small")
-    for i, (label, p) in enumerate(types_paths):
-        with cols[i % 2]:
-            if p.exists():
-                st.image(str(p), caption=label, width=140)
-                with st.expander(f"Enlarge: {label}"):
-                    st.image(str(p), use_container_width=True)
-            else:
-                st.caption(f"Missing: {p}")
+    for label, p in types_paths:
+        if p.exists():
+            st.image(str(p), caption=label, use_container_width=True)
+        else:
+            st.caption(f"Missing: {p}")
+
 
 
 def ensure_local_progress_initialized(sheet, pairs_df):
