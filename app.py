@@ -27,9 +27,19 @@ APP_ROOT = Path(__file__).resolve().parent
 SPREADSHEET_ID = "1BIwI9Q7m1bXQ-LyMPZx7yzg9w6mq5Lkgb3Gvgq3xKXU"
 CREDENTIALS_FILE = "credentials.json"  # Path to your service account JSON
 
-# Data settings
-PAIRS_CSV = "pairs.csv"
-IMAGE_BASE_PATH = "images/"
+# -----------------------------------------------------------------------------
+# Data routing settings (A/B/ALL based on annotator_id)
+# -----------------------------------------------------------------------------
+# These files/folders should live alongside app.py in your repo (relative paths).
+DATASET_A_CSV = APP_ROOT / "samplea_900_pairs.csv"
+DATASET_B_CSV = APP_ROOT / "sampleb_900_pairs.csv"
+DATASET_A_IMAGES_DIR = APP_ROOT / "imagesa"
+DATASET_B_IMAGES_DIR = APP_ROOT / "imagesb"
+
+ANNOTATORS_A = {"annotator1", "annotator2", "annotator3", "annotator4"}
+ANNOTATORS_B = {"annotator5", "annotator6", "annotator7", "annotator8"}
+
+TOTAL_A = 900  # used for offsetting B indices so pair_index is globally unique (900..1799)
 
 # If using URLs for images (e.g., from a server), set this to True
 USE_IMAGE_URLS = False
@@ -134,22 +144,85 @@ def get_completed_pairs(sheet, annotator_id):
 # DATA LOADING
 # =============================================================================
 
+def resolve_dataset_for_user(annotator_id: str) -> str:
+    """
+    Returns one of: "A", "B", "ALL"
+      - annotator1-4 -> A
+      - annotator5-8 -> B
+      - superuser 'venus' -> ALL
+      - any other username -> ALL
+    """
+    if not annotator_id:
+        return "ALL"
+    u = annotator_id.strip().lower()
+    if u in SUPER_USERS:
+        return "ALL"
+    if u in ANNOTATORS_A:
+        return "A"
+    if u in ANNOTATORS_B:
+        return "B"
+    return "ALL"
+
+
 @st.cache_data
-def load_pairs():
-    """Load image pairs from CSV."""
+def load_pairs(dataset_key: str):
+    """
+    Load image pairs depending on dataset_key in {"A","B","ALL"}.
+
+    IMPORTANT:
+    - Group A indices are 0..899
+    - Group B indices are offset to 900..1799 (TOTAL_A offset)
+      This keeps pair_index unique in Google Sheets and avoids collisions.
+    """
     try:
-        df = pd.read_csv(PAIRS_CSV)
+        if dataset_key == "A":
+            df = pd.read_csv(DATASET_A_CSV)
+            df = df.copy()
+            df["split"] = "A"
+            if "index" not in df.columns:
+                df.insert(0, "index", range(len(df)))
+            df["index"] = df["index"].astype(int)
+            return df
+
+        if dataset_key == "B":
+            df = pd.read_csv(DATASET_B_CSV)
+            df = df.copy()
+            df["split"] = "B"
+            if "index" not in df.columns:
+                df.insert(0, "index", range(len(df)))
+            df["index"] = df["index"].astype(int) + TOTAL_A
+            return df
+
+        # ALL: concatenate A then B, offset B indices by len(A)
+        df_a = pd.read_csv(DATASET_A_CSV).copy()
+        df_a["split"] = "A"
+        if "index" not in df_a.columns:
+            df_a.insert(0, "index", range(len(df_a)))
+        df_a["index"] = df_a["index"].astype(int)
+
+        df_b = pd.read_csv(DATASET_B_CSV).copy()
+        df_b["split"] = "B"
+        if "index" not in df_b.columns:
+            df_b.insert(0, "index", range(len(df_b)))
+        df_b["index"] = df_b["index"].astype(int) + len(df_a)
+
+        df = pd.concat([df_a, df_b], ignore_index=True)
+        df["index"] = df["index"].astype(int)
         return df
+
     except Exception as e:
-        st.error(f"Could not load pairs CSV: {e}")
+        st.error(f"Could not load pairs CSV(s): {e}")
         return None
 
 
-def get_image_path(filename):
-    """Get the full path or URL for an image."""
+def get_image_path(filename, split: str = "A"):
+    """Get the full path or URL for an image (routes to imagesa/imagesb locally)."""
     if USE_IMAGE_URLS:
         return IMAGE_URL_BASE + str(filename)
-    return os.path.join(IMAGE_BASE_PATH, str(filename))
+
+    split = (split or "A").upper()
+    base = DATASET_B_IMAGES_DIR if split == "B" else DATASET_A_IMAGES_DIR
+    return str(base / str(filename))
 
 
 def infer_dataset_prefix(filename: str) -> str:
@@ -192,7 +265,6 @@ def render_sidebar_guidance():
 - Eye spacing / brow geometry  
 - Jaw/chin geometry, cheek fullness (structure, not expression)  
 - Ear rim / lobe attachment
-
         """
     )
 
@@ -200,7 +272,7 @@ def render_sidebar_guidance():
     st.markdown("#### Visual guides")
 
     # Main diagram reference (render full width of sidebar)
-    main_ref = Path("types/image.jpeg")
+    main_ref = APP_ROOT / "types" / "image.jpeg"
     if main_ref.exists():
         st.image(str(main_ref), caption="Facial regions reference", use_container_width=True)
     else:
@@ -208,10 +280,10 @@ def render_sidebar_guidance():
 
     # Feature-type references (render full width as well)
     types_paths = [
-        ("Eyes", Path("types/eyes.jpg")),
-        ("Nose", Path("types/nose.jpg")),
-        ("Chin", Path("types/chin.jpg")),
-        ("Face shape", Path("types/face.jpg")),
+        ("Eyes", APP_ROOT / "types" / "eyes.jpg"),
+        ("Nose", APP_ROOT / "types" / "nose.jpg"),
+        ("Chin", APP_ROOT / "types" / "chin.jpg"),
+        ("Face shape", APP_ROOT / "types" / "face.jpg"),
     ]
 
     for label, p in types_paths:
@@ -219,7 +291,6 @@ def render_sidebar_guidance():
             st.image(str(p), caption=label, use_container_width=True)
         else:
             st.caption(f"Missing: {p}")
-
 
 
 def ensure_local_progress_initialized(sheet, pairs_df):
@@ -235,7 +306,7 @@ def ensure_local_progress_initialized(sheet, pairs_df):
         else:
             st.session_state.completed_local = set()
 
-    # Optionally enforce only valid indices
+    # Optionally enforce only valid indices (important when switching A/B/ALL)
     valid_indices = set(pairs_df["index"].tolist())
     st.session_state.completed_local = {
         i for i in st.session_state.completed_local if i in valid_indices
@@ -275,7 +346,7 @@ Prefer **stable structure** over changeable appearance.
     st.markdown("---")
 
     # Image + context, compact side-by-side
-    img_path = Path("types/image.jpeg")
+    img_path = APP_ROOT / "types" / "image.jpeg"
     ic1, ic2 = st.columns([1, 1.2], gap="large")
 
     with ic1:
@@ -283,7 +354,7 @@ Prefer **stable structure** over changeable appearance.
             st.image(str(img_path), use_container_width=True)
             st.caption("Reference: facial regions that often carry identity signal.")
         else:
-            st.error("Instruction image `image.jpeg` not found in app directory.")
+            st.error("Instruction image `types/image.jpeg` not found in app directory.")
 
     with ic2:
         st.markdown("""
@@ -299,21 +370,20 @@ When deciding, actively check **multiple** regions shown in the diagram:
 Aim to cite **2–4 concrete cues** in your explanation.
 """)
 
-        # --- Visual reference grid: facial feature types ---
     st.markdown("### Visual references")
     st.caption(
         "While comparing a pair, you may cross-check these example feature types (eyes, nose, chin, face shape). "
-        "They are intended to help you describe *specific* differences or matches, especially in subtle cases where the persons may appear to be doppelgangers. Use this as a reference, not a strict comparison guide"
+        "They are intended to help you describe *specific* differences or matches, especially in subtle cases where the persons may appear to be doppelgangers. "
+        "Use this as a reference, not a strict comparison guide."
     )
 
     types_paths = [
-        ("Eyes", Path("types/eyes.jpg")),
-        ("Nose", Path("types/nose.jpg")),
-        ("Chin", Path("types/chin.jpg")),
-        ("Face shape", Path("types/face.jpg")),
+        ("Eyes", APP_ROOT / "types" / "eyes.jpg"),
+        ("Nose", APP_ROOT / "types" / "nose.jpg"),
+        ("Chin", APP_ROOT / "types" / "chin.jpg"),
+        ("Face shape", APP_ROOT / "types" / "face.jpg"),
     ]
 
-    # 2x2 grid (change to 3 or 4 columns if you want it tighter)
     cols = st.columns(2, gap="medium")
     for i, (label, p) in enumerate(types_paths):
         with cols[i % 2]:
@@ -326,13 +396,11 @@ Aim to cite **2–4 concrete cues** in your explanation.
 
     # Examples: Same vs Different
     e1, e2 = st.columns(2, gap="large")
-
     with e1:
         st.markdown("""
 ### Example — Same person (strong)
 > “Same person. The eye spacing and brow shape match closely, and the nose bridge width with the nostril shape is consistent. Despite lighting differences, the jawline contour and chin shape align.”
 """)
-
     with e2:
         st.markdown("""
 ### Example — Different people (strong)
@@ -355,7 +423,6 @@ Aim to cite **2–4 concrete cues** in your explanation.
         total = len(pairs_df)
 
         st.info(f"Welcome back, **{st.session_state.annotator_id}**!")
-
         progress = len(completed) / total if total > 0 else 0
         st.progress(progress)
         st.caption(f"Your progress: {len(completed)} / {total} pairs completed")
@@ -370,7 +437,7 @@ Aim to cite **2–4 concrete cues** in your explanation.
     # Annotator ID input
     annotator_id = st.text_input(
         f"Enter your name or ID (minimum {MIN_NAME_LENGTH} characters):",
-        placeholder="e.g., john_doe or student_01",
+        placeholder="e.g., annotator1 or student_01",
         key="annotator_input"
     )
 
@@ -390,8 +457,11 @@ Aim to cite **2–4 concrete cues** in your explanation.
             st.error(f"Your name/ID must be at least {MIN_NAME_LENGTH} characters.")
         else:
             st.session_state.annotator_id = annotator_id.strip()
-            st.session_state.is_super = (st.session_state.annotator_id in SUPER_USERS)
+            st.session_state.is_super = (st.session_state.annotator_id.lower() in SUPER_USERS)
             st.session_state.mode = "review" if st.session_state.is_super else "annotate"
+
+            # Decide which dataset this user sees
+            st.session_state.dataset_key = resolve_dataset_for_user(st.session_state.annotator_id)
 
             if sheet is not None:
                 from_sheet = get_completed_pairs(sheet, st.session_state.annotator_id)
@@ -511,15 +581,17 @@ def show_super_review_interface(pairs_df):
                 f"ground_truth: {row['ground_truth']}",
                 f"celeb_id: {row.get('celeb_id', '')}",
                 f"dataset: {row.get('dataset', '')}",
+                f"split: {row.get('split', '')}",
             ]
         )
     )
 
     st.markdown("#### Images")
+    split = row.get("split", "A")
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("**Face A**")
-        img_a = get_image_path(row["A"])
+        img_a = get_image_path(row["A"], split=split)
         try:
             st.image(img_a, width=340)
         except Exception:
@@ -527,7 +599,7 @@ def show_super_review_interface(pairs_df):
         st.caption(str(row["A"]))
     with c2:
         st.markdown("**Face B**")
-        img_b = get_image_path(row["B"])
+        img_b = get_image_path(row["B"], split=split)
         try:
             st.image(img_b, width=340)
         except Exception:
@@ -537,7 +609,6 @@ def show_super_review_interface(pairs_df):
     st.divider()
     st.markdown("#### Flag this pair for offline fix (optional)")
 
-    # Note stored per pair (doesn't require a flag)
     note = st.text_input("Optional note (stored with flag)", key=f"note_{pair_index}")
 
     b1, b2, b3 = st.columns([1.2, 1.2, 1.2])
@@ -587,8 +658,6 @@ def show_super_review_interface(pairs_df):
     if st.session_state.super_flags:
         st.markdown("#### Flagged list (this session)")
         flags_df = pd.DataFrame(st.session_state.super_flags)
-
-        # Keep most recent flag per index
         flags_df = flags_df.drop_duplicates(subset=["index"], keep="last").sort_values("index")
         st.dataframe(flags_df, use_container_width=True)
 
@@ -617,7 +686,6 @@ def show_annotation_interface(pairs_df, sheet):
     num_completed = len(completed)
     progress = num_completed / total if total > 0 else 0
 
-    # Top row: title + progress bar
     header_col, progress_col = st.columns([1.2, 2])
     with header_col:
         st.markdown("### Face Identity Annotation")
@@ -629,7 +697,6 @@ def show_annotation_interface(pairs_df, sheet):
     with progress_col:
         st.progress(progress)
 
-    # All done
     if not remaining:
         st.success("You have completed all annotations! Thank you!")
         if st.button("Start over (re-annotate all pairs)"):
@@ -638,15 +705,10 @@ def show_annotation_interface(pairs_df, sheet):
             st.rerun()
         return
 
-    # Current pair (always first remaining)
     current_pair = remaining[0]
     pair_data = pairs_df[pairs_df['index'] == current_pair].iloc[0]
-
-    # Are we in "review incorrect" mode for this pair?
     review_mode = st.session_state.get("submitted", False)
 
-    # Sidebar (minimal)
-    # Sidebar (guidance + session controls)
     with st.sidebar:
         render_sidebar_guidance()
 
@@ -657,7 +719,6 @@ def show_annotation_interface(pairs_df, sheet):
         st.markdown(f"**Completed:** {num_completed} / {total}")
 
         st.divider()
-        # Rename "View Instructions" -> "Home"
         if st.button("Home"):
             st.session_state.show_instructions = True
             st.rerun()
@@ -667,25 +728,29 @@ def show_annotation_interface(pairs_df, sheet):
             st.session_state.show_instructions = True
             if "completed_local" in st.session_state:
                 del st.session_state.completed_local
+            if "dataset_key" in st.session_state:
+                del st.session_state.dataset_key
             st.session_state.submitted = False
             st.rerun()
-
 
     st.markdown("#### 1. Compare these faces")
 
     outer_left, outer_center, outer_right = st.columns([0.1, 0.8, 0.1])
     with outer_center:
         img_col1, img_col2 = st.columns(2)
+        split = pair_data.get("split", "A")
+
         with img_col1:
             st.markdown("**Face A**")
-            image_a_path = get_image_path(pair_data['A'])
+            image_a_path = get_image_path(pair_data['A'], split=split)
             try:
                 st.image(image_a_path, width=320)
             except Exception:
                 st.error(f"Could not load image: {image_a_path}")
+
         with img_col2:
             st.markdown("**Face B**")
-            image_b_path = get_image_path(pair_data['B'])
+            image_b_path = get_image_path(pair_data['B'], split=split)
             try:
                 st.image(image_b_path, width=320)
             except Exception:
@@ -902,6 +967,8 @@ def main():
         st.session_state.show_instructions = True
     if 'annotator_id' not in st.session_state:
         st.session_state.annotator_id = None
+    if 'dataset_key' not in st.session_state:
+        st.session_state.dataset_key = "ALL"
     if 'submitted' not in st.session_state:
         st.session_state.submitted = False
     if 'is_super' not in st.session_state:
@@ -909,13 +976,14 @@ def main():
     if 'mode' not in st.session_state:
         st.session_state.mode = "annotate"  # super users can switch to "review"
 
-    # Load data
-    pairs_df = load_pairs()
+    # Load data (dataset depends on annotator)
+    dataset_key = st.session_state.get("dataset_key", "ALL")
+    pairs_df = load_pairs(dataset_key)
     if pairs_df is None:
-        st.error("Could not load pairs data. Please check your pairs.csv file.")
+        st.error("Could not load pairs data. Please check your samplea/sampleb CSV files.")
         return
 
-    # Connect to Google Sheets (still used for normal annotators)
+    # Connect to Google Sheets
     sheet = get_google_sheet()
     if sheet is None:
         st.warning("Running without Google Sheets. Annotations will not be saved.")
@@ -929,6 +997,11 @@ def main():
         st.session_state.show_instructions = True
         st.rerun()
         return
+
+    # If user got here without dataset_key set (rare), set it now
+    if not st.session_state.get("dataset_key"):
+        st.session_state.dataset_key = resolve_dataset_for_user(st.session_state.annotator_id)
+        st.rerun()
 
     # Super user mode selector
     if st.session_state.is_super:
