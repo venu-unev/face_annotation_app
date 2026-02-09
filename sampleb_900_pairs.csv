@@ -799,4 +799,3 @@ index,A,B,ground_truth,celeb_id
 797,celeba_104_166641.jpg,celeba_3949_160604.jpg,different,3949_104
 798,celeba_3306_005343.jpg,celeba_4555_180845.jpg,different,4555_3306
 799,lfw_Bill_Sizemore_Bill_Sizemore_0001.jpg,lfw_Jack_Straw_Jack_Straw_0015.jpg,different,Bill_Sizemore_Jack_Straw
-
