@@ -436,8 +436,8 @@ Aim to cite **2–4 concrete cues** in your explanation.
 
     # Annotator ID input
     annotator_id = st.text_input(
-        f"Enter your name or ID (minimum {MIN_NAME_LENGTH} characters):",
-        placeholder="e.g., annotator1 or student_01",
+        f"Enter your annotator ID (minimum {MIN_NAME_LENGTH} characters):",
+        placeholder="e.g., annotator1",
         key="annotator_input"
     )
 
